@@ -32,9 +32,9 @@ F_u = Distributions.MvNormal(zeros(size(HH, 1)), HH)
 # Tuning of the tempered particle filter algorithm
 
 tuning = Dict(:r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
-              :xtol => 0., :resampling_method => :systematic, :N_MH => 1,
+               :resampling_method => :systematic, :N_MH => 1,
               :n_particles => 1000, :n_presample_periods => 0,
-              :adaptive => true, :allout => true, :parallel => false)
+               :allout => true, :parallel => false)
 
 # Generation of the initial state draws
 
