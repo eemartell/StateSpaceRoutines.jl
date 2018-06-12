@@ -1,5 +1,3 @@
-using BenchmarkTools
-
 """
 ```
 tempered_particle_filter{S<:AbstractFloat}(data::Array{S}, Φ::Function,
@@ -157,25 +155,6 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             log_e_1_terms = squeeze(log_e_1_terms, 1)
             log_e_2_terms = squeeze(log_e_2_terms, 1)
         else
-            println("Initialization: Computing coeff, log_e_1, log_e_2")
-            @btime tmp_out = begin
-                # Draw random shock ϵ
-                ϵ = $rand($F_ϵ, $n_particles)
-
-                # Forecast forward one time step
-                s_t_nontempered = $Φ_bcast($s_lag_tempered, ϵ)
-
-                # Error for each particle
-                p_error = $y_t .- $Ψ_bcast_t(s_t_nontempered, zeros($n_obs_t, $n_particles))
-
-                # Solve for initial tempering parameter φ_1
-                for i in 1:$n_particles
-                    $coeff_terms[i], $log_e_1_terms[i], $log_e_2_terms[i] = $weight_kernel(0., $y_t, p_error[:, i],
-                                                                                   $det_HH_t, $inv_HH_t,
-                                                                                   initialize = true)
-                end
-                1
-            end
             # Draw random shock ϵ
             ϵ = rand(F_ϵ, n_particles)
 
@@ -194,15 +173,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         end
 
 
-        println("Initialization: Computing φ_1 via bisection for inefficiency ratio")
         if adaptive
-            @btime φ_1 = begin
-                init_Ineff_func(φ) = $solve_inefficiency(φ, $coeff_terms, $log_e_1_terms,
-                                                    $log_e_2_terms, $n_obs_t,
-                                                    parallel = false) - $r_star
-                $bisection(init_Ineff_func, 1e-30, 1.0, tol = $tol)
-                # φ_1 = fzero(init_Ineff_func, 1e-30, 1., xtol = 0.)
-            end
             init_Ineff_func(φ) =  solve_inefficiency(φ,  coeff_terms,  log_e_1_terms,
                                                      log_e_2_terms,  n_obs_t,
                                                     parallel = false) -  r_star
@@ -215,14 +186,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             @show φ_1
             println("------------------------------")
         end
-        println("Initialization: Conducting correction step")
-        @btime out = begin
-            normalized_weights, loglik = $correction($φ_1, $coeff_terms, $log_e_1_terms, $log_e_2_terms, $n_obs_t)
-        end
         normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
-        @btime out = begin
-            test1, test2, test3 = $selection($normalized_weights, $s_lag_tempered,                                     $s_t_nontempered, $ϵ; resampling_method = $resampling_method)
-        end
         s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                        s_t_nontempered, ϵ; resampling_method = resampling_method)
 
