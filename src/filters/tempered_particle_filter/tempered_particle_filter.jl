@@ -328,8 +328,8 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 tmp1, tmp2, tmp3 = $selection($normalized_weights, $s_lag_tempered,
                                             $s_t_nontempered, $ϵ)
                 tmp3
-            step2_select_time = step2_select_time + minimum(benchmarkData).time
             end
+            step2_select_time = step2_select_time + minimum(benchmarkData).time
             s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                            s_t_nontempered, ϵ; resampling_method = resampling_method)
 
@@ -354,8 +354,8 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                                                        $s_t_nontempered, $s_lag_tempered, $ϵ, $c, $N_MH;
                                                        parallel = $parallel)
                 tmp2
-            step2_mutate_time = step2_mutate_time + minimum(benchmarkData).time
             end
+            step2_mutate_time = step2_mutate_time + minimum(benchmarkData).time
             s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
                                                        s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
                                                        parallel = parallel)
