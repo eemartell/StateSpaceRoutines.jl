@@ -400,12 +400,20 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     end
 
     # printing out benchmark times
-    num_temp_iters = sum(count_over_all_periods)
+    num_temp_iters = sum(count_over_all_periods) # total number of tempering iterations
     println("Step 2 benchmark times. Times are in ns\n")
     println("Step 2: Computing coeff, log_e_1, log_e_2")
     println(step2_computecoeff_time/num_temp_iters)
+    println("\n")
+    println("Step 2: Compute φ_1")
     println(step2_computeφ_1_time/num_temp_iters)
+    println("\n")
+    println("Step 2: Computing coeff, log_e_1, log_e_2")
     println(step2_correct_time/num_temp_iters)
+    println("\n")
+    println("Step 2: Computing coeff, log_e_1, log_e_2")
     println(step2_select_coeff_time/num_temp_iters)
+    println("\n")
+    println("Step 2: Computing coeff, log_e_1, log_e_2")
     println(step2_mutate_coeff_time/num_temp_iters)
 end
