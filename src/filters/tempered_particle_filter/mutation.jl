@@ -1,3 +1,5 @@
+using BenchmarkTools
+
 """
 ```
 mutation{S<:AbstractFloat}(system::System{S}, y_t::Array{S,1}, s_init::Array{S,1},
@@ -82,6 +84,7 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
     return s_out, ϵ_out, accept_rate
 end
 
+#begin @btime
 function mh_step(Φ::Function, Ψ::Function, y_t::Vector{Float64}, s_init::Vector{Float64},
                  s_non::Vector{Float64}, ϵ_init::Vector{Float64}, ϵ_new::Vector{Float64},
                  φ_new::Float64, det_HH::Float64, inv_HH::Matrix{Float64},
@@ -90,6 +93,7 @@ function mh_step(Φ::Function, Ψ::Function, y_t::Vector{Float64}, s_init::Vecto
     ϵ_out = similar(ϵ_init)
     accept = 0.
 
+    #begin @btime
     for j = 1:N_MH
 
         # Use the state equation to calculate the corresponding state from that ε
@@ -133,6 +137,8 @@ function mh_step(Φ::Function, Ψ::Function, y_t::Vector{Float64}, s_init::Vecto
         end
         ϵ_init = ϵ_out
         s_non  = s_out
-    end
+    #end
     return s_out, ϵ_out, accept
+    end
 end
+#end

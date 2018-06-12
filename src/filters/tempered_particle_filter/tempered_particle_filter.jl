@@ -1,3 +1,5 @@
+using BenchmarkTools
+
 """
 ```
 tempered_particle_filter{S<:AbstractFloat}(data::Array{S}, Φ::Function,
@@ -55,6 +57,7 @@ fixed schedule inputted directly into the tpf function.
 - `times`: (`hist_periods` x 1) vector returning elapsed runtime per period t
 
 """
+
 function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Function, Ψ::Function,
                                                     F_ϵ::Distribution, F_u::Distribution, s_init::Matrix{S};
                                                     verbose::Symbol = :high, fixed_sched::Vector{S} = zeros(0),
@@ -87,6 +90,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     times     = zeros(T)
 
     # Ensuring Φ, Ψ broadcast to matrices
+    #begin @btime
     function Φ_bcast(s_t1::Matrix{S}, ϵ_t1::Matrix{S})
         s_t = similar(s_t1)
         for i in 1:n_particles
@@ -94,6 +98,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         end
         return s_t
     end
+    #end
 
     function Ψ_bcast(s_t::Matrix{S}, u_t::Matrix{S})
         y_t = similar(u_t)
@@ -192,14 +197,17 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
         normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
         s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
-                                                       s_t_nontempered, ϵ; resampling_method = resampling_method)
-
+                                               s_t_nontempered, ϵ; resampling_method = resampling_method)
+        #begin @btime
         # Update likelihood
+        #@btime $lik[$t] += $loglik
         lik[t] += loglik
 
         # Tempering initialization
         φ_old = φ_1
         count = 1
+
+        #end
 
         #--------------------------------------------------------------
         # Main Algorithm
@@ -258,9 +266,28 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 print("Mutation ")
             end
 
-            s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
+
+            s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, (F_ϵ.Σ.mat), det_HH_t, inv_HH_t, φ_new, y_t,
                                                        s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
                                                        parallel = parallel)
+
+            if count == 2
+            @time begin
+            s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, (F_ϵ.Σ.mat), det_HH_t, inv_HH_t, φ_new, y_t,
+                                                       s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
+                                                       parallel = parallel)
+            end
+            throw("Stop")
+            end
+
+            #=
+            @btime begin
+            s_t_nontempered, ϵ, accept_rate = mutation($Φ, $Ψ_t, $(F_ϵ.Σ.mat), $det_HH_t, $inv_HH_t, $φ_new, $y_t,
+                                                       $s_t_nontempered, $s_lag_tempered, $ϵ, $c, $N_MH;
+                                                       parallel = $parallel)
+            end
+            =#
+
 
             # if VERBOSITY[verbose] >= VERBOSITY[:high]
                 # toc()
