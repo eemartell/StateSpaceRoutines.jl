@@ -222,7 +222,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
         println("Initialization: Conducting selection step")
         @btime out = begin
-            test1, test2, test3 = $selection($normalized_weights, $s_lag_tempered,                                     $s_t_nontempered, $ϵ; resampling_method = $resampling_method)
+            test1, test2, test3 = $selection($normalized_weights, $s_lag_tempered,                                     $s_t_nontempered, $ϵ)
         end
         s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                        s_t_nontempered, ϵ; resampling_method = resampling_method)
@@ -241,17 +241,19 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
             count += 1
 
+            if count == 2
             println("Step 2: Computing coeff, log_e_1, log_e_2")
             @btime out = begin
                 # Get error for all particles
                 p_error = $y_t .- $Ψ_bcast_t($s_t_nontempered, zeros($n_obs_t, $n_particles))
 
-                for i in 1:n_particles
+                for i in 1:$n_particles
                     tmp1, tmp2, tmp3 = $weight_kernel($φ_old, $y_t,  p_error[:, i],
                                                                                    $det_HH_t, $inv_HH_t,
                                                                                    initialize = false)
                 end
                 p_error
+            end
             end
             # Get error for all particles
             p_error = y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles))
@@ -261,14 +263,14 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                                                                                    det_HH_t, inv_HH_t,
                                                                                    initialize = false)
             end
-
+            if count == 2
             println("Step 2: Computing φ_1 via bisection for inefficiency ratio")
             @btime out = begin
                 # Define inefficiency function
                 init_ineff_func(φ) = $solve_inefficiency(φ, $coeff_terms, $log_e_1_terms,
                                                   $log_e_2_terms, $n_obs_t,
                                                     parallel = false) - $r_star
-                fphi_interval = [$init_ineff_func($φ_old) $init_ineff_func(1.0)]
+                fphi_interval = [init_ineff_func($φ_old) init_ineff_func(1.0)]
 
                 # The below boolean checks that a solution exists within interval
                 if prod(sign.(fphi_interval)) == -1 && $adaptive
@@ -279,11 +281,8 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 else # fixed φ
                     φ_new = $fixed_sched[$count]
                 end
-
-                if $VERBOSITY[$verbose] >= $VERBOSITY[:high]
-                    @show φ_new
-                end
                 fphi_interval
+            end
             end
             # Define inefficiency function
             init_ineff_func(φ) = solve_inefficiency(φ, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t,
@@ -305,17 +304,21 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             end
 
             # Correct and resample particles
+            if count == 2
             println("Step 2: correction")
             @btime out = begin
                 tmp1, tmp2 = $correction($φ_new, $coeff_terms, $log_e_1_terms, $log_e_2_terms, $n_obs_t)
                 tmp2
             end
+            end
             normalized_weights, loglik = correction(φ_new, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
+            if count == 2
             println("Step 2: selection")
             @btime out = begin
-                tmp1, tmp2, tmp3 = selection(normalized_weights, s_lag_tempered,
-                                            s_t_nontempered, ϵ; resampling_method = resampling_method)
+                tmp1, tmp2, tmp3 = $selection($normalized_weights, $s_lag_tempered,
+                                            $s_t_nontempered, $ϵ)
                 tmp3
+            end
             end
             s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                            s_t_nontempered, ϵ; resampling_method = resampling_method)
@@ -336,13 +339,14 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             if VERBOSITY[verbose] >= VERBOSITY[:high]
                 print("Mutation ")
             end
-
+            if count == 2
             println("Step 2: mutation")
             @btime out = begin
                 tmp1, tmp2, tmp3 = $mutation($Φ, $Ψ_t, $F_ϵ.Σ.mat, $det_HH_t, $inv_HH_t, $φ_new, $y_t,
                                                        $s_t_nontempered, $s_lag_tempered, $ϵ, $c, $N_MH;
                                                        parallel = $parallel)
                 tmp2
+            end
             end
             s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
                                                        s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
