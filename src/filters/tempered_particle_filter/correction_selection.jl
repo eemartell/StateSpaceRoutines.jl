@@ -25,13 +25,18 @@
 # """
 
 function correction(φ_new::Float64, coeff_terms::Vector{Float64}, log_e_1_terms::Vector{Float64},
-                    log_e_2_terms::Vector{Float64}, n_obs::Int64)
+                    log_e_2_terms::Vector{Float64}, n_obs::Int64, parallel::Bool = false)
     n_particles = length(coeff_terms)
-    incremental_weights = Vector{Float64}(n_particles)
-    for i = 1:n_particles
-        incremental_weights[i] = incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
+    if parallel
+        incremental_weights = @parallel (vcat) for i = 1:n_particles
+            incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
+        end
+    else
+        incremental_weights = Vector{Float64}(n_particles)
+        for i = 1:n_particles
+            incremental_weights[i] = incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
+        end
     end
-
     normalized_weights = incremental_weights ./ mean(incremental_weights)
 
     # Calculate likelihood

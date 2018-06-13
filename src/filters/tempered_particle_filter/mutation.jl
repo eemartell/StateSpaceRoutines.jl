@@ -93,7 +93,7 @@ function mh_step(Φ::Function, Ψ::Function, y_t::Vector{Float64}, s_init::Vecto
     ϵ_out = similar(ϵ_init)
     accept = 0.
 
-    #begin @btime
+
     for j = 1:N_MH
 
         # Use the state equation to calculate the corresponding state from that ε

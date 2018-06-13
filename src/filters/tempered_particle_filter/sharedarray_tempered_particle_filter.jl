@@ -85,29 +85,52 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
     n_states  = size(s_init, 1)
     lik       = zeros(T)
     times     = zeros(T)
-    # Ensuring Φ, Ψ broadcast to matrices
-    function Φ_bcast(s_t1::Matrix{S}, ϵ_t1::Matrix{S})
-        s_t = similar(s_t1)
-        for i in 1:n_particles
-            s_t[:, i] = Φ(s_t1[:, i], ϵ_t1[:, i])
-        end
-        return s_t
-    end
 
-    function Ψ_bcast(s_t::Matrix{S}, u_t::Matrix{S})
-        y_t = similar(u_t)
-        for i in 1:n_particles
-            y_t[:, i] = Ψ(s_t[:, i], u_t[:, i])
-        end
-        return y_t
-    end
+    # Ensuring Φ, Ψ broadcast to matrices or SharedArrays, depending on parallel
+    # if parallel
+    #     function Φ_bcast(s_t1::Matrix{S}, ϵ_t1::Matrix{S})
+    #         s_t = similar(s_t1)
+    #         for i in 1:n_particles
+    #             s_t[:, i] = Φ(s_t1[:, i], ϵ_t1[:, i])
+    #         end
+    #         return SharedArray(s_t)
+    #     end
 
+    #     function Ψ_bcast(s_t::Matrix{S}, u_t::Matrix{S})
+    #         y_t = similar(u_t)
+    #         for i in 1:n_particles
+    #             y_t[:, i] = Ψ(s_t[:, i], u_t[:, i])
+    #         end
+    #         return SharedArray(y_t)
+    #     end
+    # else
+        function Φ_bcast(s_t1::Matrix{S}, ϵ_t1::Matrix{S})
+            s_t = similar(s_t1)
+            for i in 1:n_particles
+                s_t[:, i] = Φ(s_t1[:, i], ϵ_t1[:, i])
+            end
+            return s_t
+        end
+
+        function Ψ_bcast(s_t::Matrix{S}, u_t::Matrix{S})
+            y_t = similar(u_t)
+            for i in 1:n_particles
+                y_t[:, i] = Ψ(s_t[:, i], u_t[:, i])
+            end
+            return y_t
+        end
+    # end
     #--------------------------------------------------------------
     # Main Algorithm: Tempered Particle Filter
     #--------------------------------------------------------------
 
     # Draw initial particles from the distribution of s₀: N(s₀, P₀)
-    s_lag_tempered = s_init
+    if parallel
+        # Convert to SharedArray for upcoming parallel computation
+        s_lag_tempered = SharedArray(s_init)
+    else
+        s_lag_tempered = s_init
+    end
 
     # Vectors of the 3 component terms that are used to calculate the weights
     # Inputs saved in these vectors to conserve memory/avoid unnecessary re-computation
@@ -151,9 +174,9 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                                                                        initialize = true)
                 vector_reshape(ε, s_t_non, coeff_term, log_e_1_term, log_e_2_term)
             end
-            coeff_terms = squeeze(coeff_terms, 1)
-            log_e_1_terms = squeeze(log_e_1_terms, 1)
-            log_e_2_terms = squeeze(log_e_2_terms, 1)
+            coeff_terms = SharedArray(squeeze(coeff_terms, 1))
+            log_e_1_terms = SharedArray(squeeze(log_e_1_terms, 1))
+            log_e_2_terms = SharedArray(squeeze(log_e_2_terms, 1))
         else
             # Draw random shock ϵ
             ϵ = rand(F_ϵ, n_particles)
@@ -176,7 +199,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
         if adaptive
             init_Ineff_func(φ) =  solve_inefficiency(φ,  coeff_terms,  log_e_1_terms,
                                                      log_e_2_terms,  n_obs_t,
-                                                    parallel = false) -  r_star
+                                                    parallel = parallel) -  r_star
             φ_1 =  bisection(init_Ineff_func, 1e-30, 1.0, tol =  tol)
         else
             φ_1 = fixed_sched[1]
@@ -186,7 +209,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
             @show φ_1
             println("------------------------------")
         end
-        normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
+        normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t, parallel = parallel)
         s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                        s_t_nontempered, ϵ; resampling_method = resampling_method)
 
@@ -204,18 +227,30 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
 
             count += 1
 
-            # Get error for all particles
-            p_error = y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles))
-
-            for i in 1:n_particles
-                coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t, p_error[:, i],
-                                                                                   det_HH_t, inv_HH_t,
+            if parallel
+                # Get error for all particles
+                p_error = SharedArray(y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles)))
+                coeff_terms, log_e_1_terms, log_e_2_terms @parallel (vector_reduce) for i = 1:n_particles
+                    coeff_term, log_e_1_term, log_e_2_term = weight_kernel(φ_old, y_t,
+                                                                           p_error[:, i], det_HH_t, inv_HH_t,
                                                                                    initialize = false)
+                    vector_reshape(coeff_term, log_e_1_term, log_e_2_term)
+                end
+                coeff_terms = SharedArray(squeeze(coeff_terms, 1))
+                log_e_1_terms = SharedArray(squeeze(log_e_1_terms, 1))
+                log_e_2_terms = SharedArray(squeeze(log_e_2_terms, 1))
+            else
+                p_error = y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles))
+                for i in 1:n_particles
+                    coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t,
+                                                                           p_error[:, i], det_HH_t, inv_HH_t,
+                                                                                   initialize = false)
+                end
             end
 
             # Define inefficiency function
             init_ineff_func(φ) = solve_inefficiency(φ, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t,
-                                                    parallel = false) - r_star
+                                                    parallel = parallel) - r_star
             fphi_interval = [init_ineff_func(φ_old) init_ineff_func(1.0)]
 
             # The below boolean checks that a solution exists within interval
@@ -233,7 +268,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
             end
 
             # Correct and resample particles
-            normalized_weights, loglik = correction(φ_new, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
+            normalized_weights, loglik = correction(φ_new, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t, parallel = parallel)
             s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                            s_t_nontempered, ϵ; resampling_method = resampling_method)
 
@@ -254,10 +289,19 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                 print("Mutation ")
             end
 
-            s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
+            if parallel
+                # Convert arrays to SharedArrays
+                ϵ = SharedArray(ϵ)
+                s_lag_tempered = SharedArray(s_lag_tempered)
+                s_t_nontempered = SharedArray(s_t_nontempered)
+                s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
                                                        s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
                                                        parallel = parallel)
-
+            else
+                s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
+                                                       s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
+                                                       parallel = parallel)
+            end
             # if VERBOSITY[verbose] >= VERBOSITY[:high]
                 # toc()
             # end
