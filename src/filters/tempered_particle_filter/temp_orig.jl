@@ -117,19 +117,6 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     log_e_1_terms = Vector{Float64}(n_particles)
     log_e_2_terms = Vector{Float64}(n_particles)
 
-    # So we can get an average over all periods for tempering steps
-    count_over_all_periods = zeros(T)
-    initial_computecoeff_time = 0.0
-    initial_computeφ_1 = 0.0
-    initial_correct_time = 0.0
-    initial_select_step = 0.0
-    step2_computecoeff_time = 0.0
-    step2_computeφ_1_time = 0.0
-    step2_correct_time = 0.0
-    step2_select_time = 0.0
-    step2_mutate_time = 0.0
-    ifparallel = 0.0
-
     for t = 1:T
 
         tic()
@@ -155,20 +142,16 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
         #####################################
         if parallel
-            println("In parallel-- Initialization: computing coeff, log_e_1, log_e_2")
-            benchmarkData = @benchmark tmp_out = begin
-                ϵ = Matrix{Float64}(n_shocks, n_particles)
-                s_t_nontempered = similar(s_lag_tempered)
-                ϵ, s_t_nontempered, coeff_terms, log_e_1_terms, log_e_2_terms =
-                @parallel (vector_reduce) for i in 1:n_particles
-                    ε = rand(F_ϵ)
-                    s_t_non = Φ(s_lag_tempered[:, i], ε)
-                    p_err   = y_t - Ψ_t(s_t_non, zeros(n_obs_t))
-                    coeff_term, log_e_1_term, log_e_2_term = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
+            ϵ = Matrix{Float64}(n_shocks, n_particles)
+            s_t_nontempered = similar(s_lag_tempered)
+            ϵ, s_t_nontempered, coeff_terms, log_e_1_terms, log_e_2_terms =
+            @parallel (vector_reduce) for i in 1:n_particles
+                ε = rand(F_ϵ)
+                s_t_non = Φ(s_lag_tempered[:, i], ε)
+                p_err   = y_t - Ψ_t(s_t_non, zeros(n_obs_t))
+                coeff_term, log_e_1_term, log_e_2_term = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
                                                                        initialize = true)
-                    vector_reshape(ε, s_t_non, coeff_term, log_e_1_term, log_e_2_term)
-                end
-                ifparallel = ifparallel + minimum(benchmarkData).time
+                vector_reshape(ε, s_t_non, coeff_term, log_e_1_term, log_e_2_term)
             end
             coeff_terms = squeeze(coeff_terms, 1)
             log_e_1_terms = squeeze(log_e_1_terms, 1)
@@ -176,7 +159,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         else
             if t == 1
             println("Initialization: Computing coeff, log_e_1, log_e_2")
-            benchmarkData = @benchmark tmp_out = begin
+            @btime tmp_out = begin
                 # Draw random shock ϵ
                 ϵ = $rand($F_ϵ, $n_particles)
 
@@ -192,8 +175,8 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                                                                                    $det_HH_t, $inv_HH_t,
                                                                                    initialize = true)
                 end
+                1
             end
-            initial_computecoeff_time = initial_computecoeff_time + minimum(benchmarkData).time
             end
             # Draw random shock ϵ
             ϵ = rand(F_ϵ, n_particles)
@@ -215,15 +198,13 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         if adaptive
             if t == 1
             println("Initialization: Computing φ_1 via bisection for inefficiency ratio")
-             benchmarkData = @benchmark φ_1 = begin
+            @btime φ_1 = begin
                 init_Ineff_func(φ) = $solve_inefficiency(φ, $coeff_terms, $log_e_1_terms,
                                                     $log_e_2_terms, $n_obs_t,
                                                     parallel = false) - $r_star
                 $bisection(init_Ineff_func, 1e-30, 1.0, tol = $tol)
                 # φ_1 = fzero(init_Ineff_func, 1e-30, 1., xtol = 0.)
             end
-            #end
-            initial_computeφ_1 = initial_computeφ_1 + minimum(benchmarkData).time
             end
             init_Ineff_func(φ) =  solve_inefficiency(φ,  coeff_terms,  log_e_1_terms,
                                                      log_e_2_terms,  n_obs_t,
@@ -239,23 +220,19 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         end
         if t == 1
         println("Initialization: Conducting correction step")
-        benchmarkData = @benchmark out = begin
+        @btime out = begin
             normalized_weights, loglik = $correction($φ_1, $coeff_terms, $log_e_1_terms, $log_e_2_terms, $n_obs_t)
-
         end
-        initial_correct_time = initial_correct_time + minimum(benchmarkData).time
         end
         normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
         if t == 1
         println("Initialization: Conducting selection step")
-        benchmarkData = @benchmark out = begin
-            test1, test2, test3 = $selection($normalized_weights, $s_lag_tempered,
-                                     $s_t_nontempered, $ϵ)
+        @btime out = begin
+            test1, test2, test3 = $selection($normalized_weights, $s_lag_tempered,                                     $s_t_nontempered, $ϵ)
         end
-        initial_select_step =  initial_select_step + minimum(benchmarkData).time
         end
         s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
-                                                       s_t_nontempered, ϵ;  resampling_method = resampling_method)
+                                                       s_t_nontempered, ϵ; resampling_method = resampling_method)
 
         # Update likelihood
         lik[t] += loglik
@@ -270,9 +247,10 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         while φ_old < 1
 
             count += 1
-            println("in main alg")
 
-            benchmarkData = @benchmark out = begin
+            if count == 2 && t == 1
+            println("Step 2: Computing coeff, log_e_1, log_e_2")
+            @btime out = begin
                 # Get error for all particles
                 p_error = $y_t .- $Ψ_bcast_t($s_t_nontempered, zeros($n_obs_t, $n_particles))
 
@@ -283,8 +261,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 end
                 p_error
             end
-            step2_computecoeff_time = step2_computecoeff_time + minimum(benchmarkData).time
-
+            end
             # Get error for all particles
             p_error = y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles))
 
@@ -293,7 +270,9 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                                                                                    det_HH_t, inv_HH_t,
                                                                                    initialize = false)
             end
-            benchmarkData = @benchmark out = begin
+            if count == 2 && t == 1
+            println("Step 2: Computing φ_1 via bisection for inefficiency ratio")
+            @btime out = begin
                 # Define inefficiency function
                 init_ineff_func(φ) = $solve_inefficiency(φ, $coeff_terms, $log_e_1_terms,
                                                   $log_e_2_terms, $n_obs_t,
@@ -311,8 +290,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 end
                 fphi_interval
             end
-            step2_computeφ_1_time = step2_computeφ_1_time + minimum(benchmarkData).time
-
+            end
             # Define inefficiency function
             init_ineff_func(φ) = solve_inefficiency(φ, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t,
                                                     parallel = false) - r_star
@@ -333,18 +311,22 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             end
 
             # Correct and resample particles
-            benchmarkData = @benchmark out = begin
+            if count == 2 && t == 1
+            println("Step 2: correction")
+            @btime out = begin
                 tmp1, tmp2 = $correction($φ_new, $coeff_terms, $log_e_1_terms, $log_e_2_terms, $n_obs_t)
                 tmp2
             end
-            step2_correct_time = step2_correct_time + minimum(benchmarkData).time
+            end
             normalized_weights, loglik = correction(φ_new, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
-            benchmarkData = @benchmark out = begin
+            if count == 2 && t == 1
+            println("Step 2: selection")
+            @btime out = begin
                 tmp1, tmp2, tmp3 = $selection($normalized_weights, $s_lag_tempered,
                                             $s_t_nontempered, $ϵ)
                 tmp3
             end
-            step2_select_time = step2_select_time + minimum(benchmarkData).time
+            end
             s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                            s_t_nontempered, ϵ; resampling_method = resampling_method)
 
@@ -364,13 +346,15 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             if VERBOSITY[verbose] >= VERBOSITY[:high]
                 print("Mutation ")
             end
-            benchmarkData = @benchmark out = begin
+            if count == 2 && t == 1
+            println("Step 2: mutation")
+            @btime out = begin
                 tmp1, tmp2, tmp3 = $mutation($Φ, $Ψ_t, $F_ϵ.Σ.mat, $det_HH_t, $inv_HH_t, $φ_new, $y_t,
                                                        $s_t_nontempered, $s_lag_tempered, $ϵ, $c, $N_MH;
                                                        parallel = $parallel)
                 tmp2
             end
-            step2_mutate_time = step2_mutate_time + minimum(benchmarkData).time
+            end
             s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
                                                        s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
                                                        parallel = parallel)
@@ -385,9 +369,6 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             # Update φ
             φ_old = φ_new
         end
-
-    # storing number of tempering iterations
-    count_over_all_periods[t] = count
 
     if VERBOSITY[verbose] >= VERBOSITY[:high]
         println("Out of main while-loop.")
@@ -413,31 +394,4 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     else
         return sum(lik[n_presample_periods + 1:end])
     end
-
-    # printing out benchmark times
-    num_temp_iters = sum(count_over_all_periods) # total number of tempering iterations
-    println("Particle Initialization. Times are in ns\n")
-    println("Initialization: Computing coeff, log_e_1, log_e_2")
-    println(initial_computecoeff_time/num_temp_iters)
-    println("Initialization: Compute φ_1")
-    println(initial_computeφ_1/num_temp_iters)
-    println("Initialization: Correction step")
-    println(initial_correct_time/num_temp_iters)
-    println("Initialization: Selection step")
-    println(initial_select_step/num_temp_iters)
-    println("Step 2 benchmark times. Times are in ns\n")
-    println("Step 2: Computing coeff, log_e_1, log_e_2")
-    println(step2_computecoeff_time/num_temp_iters)
-    println("\n")
-    println("Step 2: Compute φ_1")
-    println(step2_computeφ_1_time/num_temp_iters)
-    println("\n")
-    println("Step 2: Computing coeff, log_e_1, log_e_2")
-    println(step2_correct_time/num_temp_iters)
-    println("\n")
-    println("Step 2: Computing coeff, log_e_1, log_e_2")
-    println(step2_select_coeff_time/num_temp_iters)
-    println("\n")
-    println("Step 2: Computing coeff, log_e_1, log_e_2")
-    println(step2_mutate_coeff_time/num_temp_iters)
 end
