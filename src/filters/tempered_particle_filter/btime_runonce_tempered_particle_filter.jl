@@ -142,7 +142,26 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
         #####################################
         if parallel
+            if t == 1
+            println("Initilization: Computing coeff, log_e_1, log_e_2")
             @btime out = begin
+                ϵ = Matrix{Float64}($n_shocks, $n_particles)
+                s_t_nontempered = similar($s_lag_tempered)
+                ϵ, s_t_nontempered, coeff_terms, log_e_1_terms, log_e_2_terms =
+                @parallel ($vector_reduce) for i in 1:$n_particles
+                    ε = rand($F_ϵ)
+                    s_t_non = $Φ($s_lag_tempered[:, i], ε)
+                    p_err   = $y_t - $Ψ_t(s_t_non, zeros($n_obs_t))
+                    coeff_term, log_e_1_term, log_e_2_term = $weight_kernel(0., $y_t, p_err, $det_HH_t, $inv_HH_t,
+                                                                       initialize = true)
+                    vector_reshape(ε, s_t_non, coeff_term, log_e_1_term, log_e_2_term)
+                end
+                tmp1 = squeeze(coeff_terms, 1)
+                tmp2 = squeeze(log_e_1_terms, 1)
+                tmp3 = squeeze(log_e_2_terms, 1)
+                1
+            end
+            end
             ϵ = Matrix{Float64}(n_shocks, n_particles)
             s_t_nontempered = similar(s_lag_tempered)
             ϵ, s_t_nontempered, coeff_terms, log_e_1_terms, log_e_2_terms =
@@ -157,7 +176,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             coeff_terms = squeeze(coeff_terms, 1)
             log_e_1_terms = squeeze(log_e_1_terms, 1)
             log_e_2_terms = squeeze(log_e_2_terms, 1)
-            end
+
         else
             if t == 1
             println("Initialization: Computing coeff, log_e_1, log_e_2")
