@@ -171,10 +171,10 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         if parallel
             ϵ = SharedArray{Float64}(n_shocks, n_particles)
             s_t_nontempered = SharedArray(similar(s_lag_tempered))
-            @parallel (vector_reduce) for i in 1:n_particles
+            @parallel for i in 1:n_particles
                 ϵ[:,i] = rand(F_ϵ)
-                s_t_non_tempered[:,i] = Φ(s_lag_tempered[:, i], ϵ[:,i])
-                p_err   = y_t - Ψ_t(s_t_non[:,i], zeros(n_obs_t))
+                s_t_nontempered[:,i] = Φ(s_lag_tempered[:, i], ϵ[:,i])
+                p_err   = y_t - Ψ_t(s_t_nontempered[:,i], zeros(n_obs_t))
                 coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
                                                                        initialize = true)
             end
@@ -230,7 +230,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
             if parallel
                 # Get error for all particles
-                @parallel (vector_reduce) for i = 1:n_particles
+                @parallel for i = 1:n_particles
                     p_err = y_t - Ψ_t(s_t_nontempered[:,i], zeros(n_obs_t))
                     coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t,
                                                                            p_error[:, i], det_HH_t, inv_HH_t,
