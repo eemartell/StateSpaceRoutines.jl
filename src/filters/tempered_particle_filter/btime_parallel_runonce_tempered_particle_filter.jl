@@ -55,7 +55,7 @@ fixed schedule inputted directly into the tpf function.
 - `times`: (`hist_periods` x 1) vector returning elapsed runtime per period t
 
 """
-function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Function, Ψ::Function,
+function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Function, Ψ::Function,
                                                     F_ϵ::Distribution, F_u::Distribution, s_init::Matrix{S};
                                                     verbose::Symbol = :high, fixed_sched::Vector{S} = zeros(0),
                                                     r_star::S = 2., c::S = 0.3, accept_rate::S = 0.4, target::S = 0.4,
@@ -171,7 +171,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                 ϵ, s_t_nontempered, coeff_terms, log_e_1_terms, log_e_2_terms =
                 @parallel ($vector_reduce) for i in 1:$n_particles
                     ε = rand($F_ϵ)
-                    s_t_non = Φ($s_lag_tempered[:, i], ε)
+                    s_t_non = $Φ($s_lag_tempered[:, i], ε)
                     p_err   = $y_t - $Ψ_t(s_t_non, zeros($n_obs_t))
                     coeff_term, log_e_1_term, log_e_2_term = $weight_kernel(0., $y_t, p_err,
                                                                       $det_HH_t, $inv_HH_t, initialize = true)
@@ -182,7 +182,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                 log_e_2_terms = SharedArray(squeeze(log_e_2_terms, 1))
                 ϵ
                 end
-                println("\n")
+                println("")
             end
             ϵ = Matrix{Float64}(n_shocks, n_particles)
             s_t_nontempered = similar(s_lag_tempered)
@@ -219,14 +219,14 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
 
         if adaptive
             if t == 1
-                println("Initialization: computing φ_1 via bisection for inefficiency ratio")
+                println("Initialization: Computing φ_1 via bisection for inefficiency ratio")
                 @btime out = begin
                 init_Ineff_func(φ) =  $solve_inefficiency(φ,  $coeff_terms,  $log_e_1_terms,
                                                      $log_e_2_terms,  $n_obs_t,
                                                     parallel = $parallel) -  $r_star
                 $bisection(init_Ineff_func, 1e-30, 1.0, tol =  $tol)
                end
-                println("\n")
+                println("")
             end
             init_Ineff_func(φ) =  solve_inefficiency(φ,  coeff_terms,  log_e_1_terms,
                                                      log_e_2_terms,  n_obs_t,
@@ -246,17 +246,17 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                 tmp1, tmp2 = $correction($φ_1, $coeff_terms, $log_e_1_terms, $log_e_2_terms, $n_obs_t, parallel = $parallel)
                 tmp2
             end
-            println("\n")
+            println("")
         end
         normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t, parallel = parallel)
         if t == 1
             println("Initialization: selection")
             @btime out = begin
             tmp1, tmp2, tmp3 = $selection($normalized_weights, $s_lag_tempered,
-                                                       $s_t_nontempered, $ϵ; resampling_method = $resampling_method)
+                                                       $s_t_nontempered, $ϵ)
                 1
             end
-            println("\n")
+            println("")
         end
         s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                        s_t_nontempered, ϵ; resampling_method = resampling_method)
@@ -276,7 +276,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
             count += 1
 
             if parallel
-                if t == 1 && count == 1
+                if t == 1 && count == 2
                     println("Step 2: Computing coeff, log_e_1, log_e_2")
                     @btime out = begin
                         p_error = SharedArray($y_t .- $Ψ_bcast_t($s_t_nontempered, zeros($n_obs_t, $n_particles)))
@@ -291,7 +291,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                         log_e_2_terms = SharedArray(squeeze(log_e_2_terms, 1))
                         1
                     end
-                    println("\n")
+                    println("")
                 end
                 # Get error for all particles
                 p_error = SharedArray(y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles)))
@@ -313,8 +313,8 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                 end
             end
 
-            if t == 1 & count == 1
-                println("Step 2: Computing φ_1 via isection for inefficiency ratio")
+            if t == 1 && count == 2
+                println("Step 2: Computing φ_1 via bisection for inefficiency ratio")
                 @btime out = begin
                 # Define inefficiency function
                 init_ineff_func(φ) = $solve_inefficiency(φ, $coeff_terms, $log_e_1_terms, $log_e_2_terms, $n_obs_t,
@@ -332,7 +332,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                 end
                 φ_new
                 end
-                println("\n")
+                println("")
             end
             # Define inefficiency function
             init_ineff_func(φ) = solve_inefficiency(φ, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t,
@@ -353,22 +353,22 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                 @show φ_new
             end
 
-            if t == 1 && count == 1
+            if t == 1 && count == 2
                 println("Step 2: correction")
                 @btime out = begin
                     tmp1, tmp2 = $correction($φ_new, $coeff_terms, $log_e_1_terms, $log_e_2_terms, $n_obs_t, parallel = $parallel)
                     tmp2
                 end
-                println("\n")
+                println("")
             end
-            if t == 1 && count == 1
+            if t == 1 && count == 2
                 println("Step 2: selection")
                 @btime out = begin
                     tmp1, tmp2, tmp3 = $selection($normalized_weights, $s_lag_tempered,
-                                                           $s_t_nontempered, $ϵ; resampling_method = $resampling_method)
+                                                           $s_t_nontempered, $ϵ)
                     1
                 end
-                println("\n")
+                println("")
             end
             # Correct and resample particles
             normalized_weights, loglik = correction(φ_new, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t, parallel = parallel)
@@ -393,7 +393,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
             end
 
             if parallel
-                if t == 1 && count == 1
+                if t == 1 && count == 2
                     println("Step 2: mutation")
                     @btime out = begin
                     ϵ = SharedArray($ϵ)
@@ -404,7 +404,7 @@ function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Fu
                                                        parallel = $parallel)
                     tmp3
                     end
-                    println("\n")
+                    println("")
                 end
                 # Convert arrays to SharedArrays
                 ϵ = SharedArray(ϵ)

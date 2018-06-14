@@ -25,7 +25,27 @@
 # """
 
 function correction(φ_new::Float64, coeff_terms::Vector{Float64}, log_e_1_terms::Vector{Float64},
-                    log_e_2_terms::Vector{Float64}, n_obs::Int64, parallel::Bool = false)
+                    log_e_2_terms::Vector{Float64}, n_obs::Int64; parallel::Bool = false)
+    n_particles = length(coeff_terms)
+    if parallel
+        incremental_weights = @parallel (vcat) for i = 1:n_particles
+            incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
+        end
+    else
+        incremental_weights = Vector{Float64}(n_particles)
+        for i = 1:n_particles
+            incremental_weights[i] = incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
+        end
+    end
+    normalized_weights = incremental_weights ./ mean(incremental_weights)
+
+    # Calculate likelihood
+    loglik = log(mean(incremental_weights))
+
+    return normalized_weights, loglik
+end
+function correction(φ_new::Float64, coeff_terms::SharedArray{Float64,1}, log_e_1_terms::SharedArray{Float64,1},
+                    log_e_2_terms::SharedArray{Float64,1}, n_obs::Int64; parallel::Bool = false)
     n_particles = length(coeff_terms)
     if parallel
         incremental_weights = @parallel (vcat) for i = 1:n_particles
@@ -46,6 +66,19 @@ function correction(φ_new::Float64, coeff_terms::Vector{Float64}, log_e_1_terms
 end
 
 function selection(normalized_weights::Vector{Float64}, s_lag_tempered::Matrix{Float64},
+                   s_t_nontempered::Matrix{Float64}, ϵ::Matrix{Float64};
+                   resampling_method::Symbol = :multinomial)
+    # Resampling
+    id = resample(normalized_weights, method = resampling_method)
+
+    # Update arrays for resampled indices
+    s_lag_tempered  = s_lag_tempered[:,id]
+    s_t_nontempered = s_t_nontempered[:,id]
+    ϵ               = ϵ[:,id]
+
+    return s_lag_tempered, s_t_nontempered, ϵ
+end
+function selection(normalized_weights::Vector{Float64}, s_lag_tempered::SharedArray{Float64,2},
                    s_t_nontempered::Matrix{Float64}, ϵ::Matrix{Float64};
                    resampling_method::Symbol = :multinomial)
     # Resampling

@@ -53,6 +53,26 @@ function solve_inefficiency{S<:AbstractFloat}(φ_new::S, coeff_terms::Vector{Flo
     return sum(W.^2)/n_particles
 end
 
+function solve_inefficiency{S<:AbstractFloat}(φ_new::S, coeff_terms::SharedArray{Float64,1}, exp_1_terms::SharedArray{Float64,1},
+                                              exp_2_terms::SharedArray{Float64,1}, n_obs::Int64; parallel::Bool = false)
+
+    n_particles = length(coeff_terms)
+
+    if parallel
+        w = @parallel (vcat) for i = 1:n_particles
+            incremental_weight(φ_new, coeff_terms[i], exp_1_terms[i], exp_2_terms[i], n_obs)
+        end
+    else
+        w = Vector{Float64}(n_particles)
+        for i = 1:n_particles
+            w[i] = incremental_weight(φ_new, coeff_terms[i], exp_1_terms[i], exp_2_terms[i], n_obs)
+        end
+    end
+
+    W = w/mean(w)
+    return sum(W.^2)/n_particles
+end
+
 function incremental_weight(φ_new::Float64, coeff_term::Float64, log_e_term_1::Float64,
                             log_e_term_2::Float64, n_obs::Int64)
     return φ_new^(n_obs/2)*coeff_term * exp(log_e_term_1) * exp(φ_new*log_e_term_2)
