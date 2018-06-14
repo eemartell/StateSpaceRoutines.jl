@@ -55,7 +55,7 @@ fixed schedule inputted directly into the tpf function.
 - `times`: (`hist_periods` x 1) vector returning elapsed runtime per period t
 
 """
-function orig_tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Function, Ψ::Function,
+function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Function, Ψ::Function,
                                                     F_ϵ::Distribution, F_u::Distribution, s_init::Matrix{S};
                                                     verbose::Symbol = :high, fixed_sched::Vector{S} = zeros(0),
                                                     r_star::S = 2., c::S = 0.3, accept_rate::S = 0.4, target::S = 0.4,
