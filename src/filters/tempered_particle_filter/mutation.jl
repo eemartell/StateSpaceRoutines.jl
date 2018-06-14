@@ -95,7 +95,7 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
     testing = !isempty(ϵ_testing)
 
     # Initialize s_out and ε_out
-    s_out = similar(s_init)
+    s_out = (similar(s_init))
     ϵ_out = similar(ϵ_init)
 
     # Store length of y_t, ε
@@ -111,11 +111,13 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
     #------------------------------------------------------------------------
     # Generate new draw of ε from a N(ε_init, c²I) distribution, c tuning parameter, I identity
     if parallel
-        s_out, ϵ_out, accept_vec = @sync @parallel (vector_reduce) for i = 1:n_particles
+        s_out = SharedArray(s_out)
+        ϵ_out = SharedArray(ϵ_out)
+        accept_vec = @sync @parallel (vector_reduce) for i = 1:n_particles
             ϵ_new = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
-            s, ϵ, accept = mh_step(Φ, Ψ, y_t, s_init[:,i], s_non[:,i], ϵ_init[:,i], ϵ_new,
+            s_out[:,i], ϵ_out[:,i], accept = mh_step(Φ, Ψ, y_t, s_init[:,i], s_non[:,i], ϵ_init[:,i], ϵ_new,
                                    φ_new, det_HH, inv_HH, n_obs, n_states, N_MH; testing = testing)
-            vector_reshape(s, ϵ, accept)
+            vector_reshape(accept)
         end
         accept_vec = squeeze(accept_vec, 1)
     else
