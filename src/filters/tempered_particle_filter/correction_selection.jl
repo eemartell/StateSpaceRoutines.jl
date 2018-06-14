@@ -79,7 +79,7 @@ function selection(normalized_weights::Vector{Float64}, s_lag_tempered::Matrix{F
     return s_lag_tempered, s_t_nontempered, ϵ
 end
 function selection(normalized_weights::Vector{Float64}, s_lag_tempered::SharedArray{Float64,2},
-                   s_t_nontempered::Matrix{Float64}, ϵ::Matrix{Float64};
+                   s_t_nontempered::SharedArray{Float64,2}, ϵ::SharedArray{Float64,2};
                    resampling_method::Symbol = :multinomial)
     # Resampling
     id = resample(normalized_weights, method = resampling_method)
