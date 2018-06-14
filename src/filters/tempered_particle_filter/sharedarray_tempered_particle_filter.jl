@@ -138,6 +138,8 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         coeff_terms = SharedArray{Float64}(n_particles)
         log_e_1_terms = SharedArray{Float64}(n_particles)
         log_e_2_terms = SharedArray{Float64}(n_particles)
+        ϵ = SharedArray{Float64}(n_shocks, n_particles)
+        s_t_nontempered = SharedArray(similar(s_lag_tempered))
     else
         coeff_terms = Vector{Float64}(n_particles)
         log_e_1_terms = Vector{Float64}(n_particles)
@@ -169,8 +171,6 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
         #####################################
         if parallel
-            ϵ = SharedArray{Float64}(n_shocks, n_particles)
-            s_t_nontempered = SharedArray(similar(s_lag_tempered))
             @parallel for i in 1:n_particles
                 ϵ[:,i] = rand(F_ϵ)
                 s_t_nontempered[:,i] = Φ(s_lag_tempered[:, i], ϵ[:,i])
