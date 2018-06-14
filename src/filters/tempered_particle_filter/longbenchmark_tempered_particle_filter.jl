@@ -428,7 +428,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     end
 
     # printing out benchmark times
-    num_temp_iters = sum(count_over_all_periods) # total number of tempering iterations
+    num_temp_iters = sum(count_over_all_periods-1) # total number of tempering iterations
     println("Particle Initialization. Times are in ns\n")
     println("Initialization: Computing coeff, log_e_1, log_e_2")
     println(initial_computecoeff_time/num_temp_iters)
