@@ -113,13 +113,13 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
     if parallel
         s_out = SharedArray(s_out)
         ϵ_out = SharedArray(ϵ_out)
-        accept_vec = @sync @parallel (vector_reduce) for i = 1:n_particles
+        accept_vec = @sync @parallel (vcat) for i = 1:n_particles
             ϵ_new = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
             s_out[:,i], ϵ_out[:,i], accept = mh_step(Φ, Ψ, y_t, s_init[:,i], s_non[:,i], ϵ_init[:,i], ϵ_new,
                                    φ_new, det_HH, inv_HH, n_obs, n_states, N_MH; testing = testing)
-            vector_reshape(accept)
+            accept
         end
-        accept_vec = squeeze(accept_vec, 1)
+
     else
         ϵ_new = similar(ϵ_init)
         for i in 1:n_particles
