@@ -136,7 +136,6 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
     return s_out, ϵ_out, accept_rate
 end
 
-#begin @btime
 function mh_step(Φ::Function, Ψ::Function, y_t::Vector{Float64}, s_init::Vector{Float64},
                  s_non::Vector{Float64}, ϵ_init::Vector{Float64}, ϵ_new::Vector{Float64},
                  φ_new::Float64, det_HH::Float64, inv_HH::Matrix{Float64},
@@ -193,4 +192,3 @@ function mh_step(Φ::Function, Ψ::Function, y_t::Vector{Float64}, s_init::Vecto
     return s_out, ϵ_out, accept
     end
 end
-#end
