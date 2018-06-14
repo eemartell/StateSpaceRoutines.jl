@@ -135,9 +135,9 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     # Vectors of the 3 component terms that are used to calculate the weights
     # Inputs saved in these vectors to conserve memory/avoid unnecessary re-computation
     if parallel
-        coeff_terms = SharedArray{Float64}(n_particles, 1)
-        log_e_1_terms = SharedArray{Float64}(n_particles, 1)
-        log_e_2_terms = SharedArray{Float64}(n_particles, 1)
+        coeff_terms = SharedArray{Float64}(n_particles)
+        log_e_1_terms = SharedArray{Float64}(n_particles)
+        log_e_2_terms = SharedArray{Float64}(n_particles)
     else
         coeff_terms = Vector{Float64}(n_particles)
         log_e_1_terms = Vector{Float64}(n_particles)
@@ -196,7 +196,6 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             end
         end
 
-
         if adaptive
             init_Ineff_func(φ) =  solve_inefficiency(φ,  coeff_terms,  log_e_1_terms,
                                                      log_e_2_terms,  n_obs_t,
@@ -233,7 +232,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 @parallel for i = 1:n_particles
                     p_err = y_t - Ψ_t(s_t_nontempered[:,i], zeros(n_obs_t))
                     coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t,
-                                                                           p_error[:, i], det_HH_t, inv_HH_t,
+                                                                           p_err, det_HH_t, inv_HH_t,
                                                                                    initialize = false)
                 end
             else
@@ -268,9 +267,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             normalized_weights, loglik = correction(φ_new, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t, parallel = parallel)
             s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                            s_t_nontempered, ϵ; resampling_method = resampling_method)
-            if typeof(s_lag_tempered) != SharedArray{Float64,2}
-                println("Issue, not outputting a shared array")
-            end
+
             # Update likelihood
             lik[t] += loglik
 
