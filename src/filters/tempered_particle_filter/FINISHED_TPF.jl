@@ -178,6 +178,12 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         inv_HH_t            = inv(HH_t)
         det_HH_t            = det(HH_t)
 
+        # Recast repeatedly used arrays as SharedArrays
+        if parallel
+            y_t = SharedArray(y_t)
+            HH_t = SharedArray(HH_t)
+        end
+
         #####################################
         if parallel
             @timeit to "3. (parallel) Initialization: Computing coeff, log_e_1, log_e_2" begin
@@ -313,9 +319,9 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 print("Mutation ")
             end
 
-            @timeit to "11. Step 2: mutation step" begin
-            s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
-                                                       s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
+            @timeit to "Step 2: mutation step" begin
+            s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, HH_t, det_HH_t, inv_HH_t, φ_new, y_t,
+                                                   s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
                                                        parallel = parallel)
             end
             # if VERBOSITY[verbose] >= VERBOSITY[:high]
