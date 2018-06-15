@@ -181,6 +181,8 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         #####################################
         if parallel
             @timeit to "parallel: Initialization: Computing coeff, log_e_1, log_e_2" begin
+            ϵ = SharedArray{Float64}(n_shocks, n_particles)
+            s_t_nontempered = SharedArray(similar(s_lag_tempered))
             @parallel for i in 1:n_particles
                 ϵ[:,i] = rand(F_ϵ)
                 s_t_nontempered[:,i] = Φ(s_lag_tempered[:, i], ϵ[:,i])
