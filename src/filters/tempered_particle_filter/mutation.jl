@@ -83,8 +83,8 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
 
     return s_out, ϵ_out, accept_rate
 end
-function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float64},
-                                    det_HH::Float64, inv_HH::Matrix{Float64}, φ_new::S, y_t::Vector{S},
+function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::SharedArray{Float64,2},
+                                    det_HH::Float64, inv_HH::Matrix{Float64}, φ_new::S, y_t::SharedArray{S},
                                     s_non::SharedArray{S}, s_init::SharedArray{S}, ϵ_init::SharedArray{S}, c::S, N_MH::Int;
                                     ϵ_testing::Matrix{S} = zeros(0,0), parallel::Bool = false)
     #------------------------------------------------------------------------
@@ -138,6 +138,62 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
 end
 
 function mh_step(Φ::Function, Ψ::Function, y_t::Vector{Float64}, s_init::Vector{Float64},
+                 s_non::Vector{Float64}, ϵ_init::Vector{Float64}, ϵ_new::Vector{Float64},
+                 φ_new::Float64, det_HH::Float64, inv_HH::Matrix{Float64},
+                 n_obs::Int, n_states::Int, N_MH::Int; testing::Bool = false)
+    s_out = similar(s_init)
+    ϵ_out = similar(ϵ_init)
+    accept = 0.
+
+
+    for j = 1:N_MH
+
+        # Use the state equation to calculate the corresponding state from that ε
+        s_new = Φ(s_init, ϵ_new)
+
+        # Calculate difference between data and expected y from measurement equation
+        u_t = zeros(n_obs)
+        error_new  = y_t - Ψ(s_new, u_t)
+        error_init = y_t - Ψ(s_non, u_t)
+
+        # Calculate posteriors
+        μ_1 = u_t
+        scaled_det_HH = det_HH/(φ_new)^n_obs
+        scaled_inv_HH = inv_HH*φ_new
+
+        μ_2 = zeros(n_states)
+        inv_ϵ_cov  = eye(n_states)
+
+        post_new_1  = fast_mvnormal_pdf(error_new, μ_1, scaled_det_HH, scaled_inv_HH)
+        post_new_2  = fast_mvnormal_pdf(ϵ_new, μ_2, 1., inv_ϵ_cov)
+        post_init_1 = fast_mvnormal_pdf(error_init, μ_1, scaled_det_HH, scaled_inv_HH)
+        post_init_2 = fast_mvnormal_pdf(ϵ_init, μ_2, 1., inv_ϵ_cov)
+
+        post_new = post_new_1 * post_new_2
+        post_init = post_init_1 * post_init_2
+
+        # Calculate α, probability of accepting the new particle
+        α = post_new/post_init
+        rval = testing ? 0.5 : rand()
+
+        # Accept the particle with probability α
+        if rval < α
+            # Accept and update particle
+            s_out = s_new
+            ϵ_out = ϵ_new
+            accept += 1.
+        else
+            # Reject and keep particle unchanged
+            s_out = s_non
+            ϵ_out = ϵ_init
+        end
+        ϵ_init = ϵ_out
+        s_non  = s_out
+    #end
+    return s_out, ϵ_out, accept
+    end
+end
+function mh_step(Φ::Function, Ψ::Function, y_t::SharedArray{Float64,1}, s_init::Vector{Float64},
                  s_non::Vector{Float64}, ϵ_init::Vector{Float64}, ϵ_new::Vector{Float64},
                  φ_new::Float64, det_HH::Float64, inv_HH::Matrix{Float64},
                  n_obs::Int, n_states::Int, N_MH::Int; testing::Bool = false)

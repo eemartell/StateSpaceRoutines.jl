@@ -82,9 +82,9 @@ function selection(normalized_weights::Vector{Float64}, s_lag_tempered::SharedAr
                    s_t_nontempered::SharedArray{Float64,2}, ϵ::SharedArray{Float64,2};
                    resampling_method::Symbol = :multinomial)
     # Resampling
-    id = resample(normalized_weights, method = resampling_method)
+    id = SharedArray(resample(normalized_weights, method = resampling_method))
 
-    # Update arrays for resampled indices
+    # Update shared arrays for resampled indices
     @parallel for i in 1:length(id)
         s_lag_tempered[:,i] = s_lag_tempered[:,id[i]]
         s_t_nontempered[:,i] = s_t_nontempered[:,id[i]]
