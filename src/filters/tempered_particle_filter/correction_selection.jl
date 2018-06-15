@@ -85,9 +85,11 @@ function selection(normalized_weights::Vector{Float64}, s_lag_tempered::SharedAr
     id = resample(normalized_weights, method = resampling_method)
 
     # Update arrays for resampled indices
-    s_lag_tempered  = SharedArray(s_lag_tempered[:,id])
-    s_t_nontempered = SharedArray(s_t_nontempered[:,id])
-    ϵ               = SharedArray(ϵ[:,id])
+    @parallel for i in 1:length(id)
+        s_lag_tempered[:,i] = s_lag_tempered[:,id[i]]
+        s_t_nontempered[:,i] = s_t_nontempered[:,id[i]]
+        ϵ[:,i] = ϵ[:,id[i]]
+    end
 
     return s_lag_tempered, s_t_nontempered, ϵ
 end
