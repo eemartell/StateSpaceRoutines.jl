@@ -141,11 +141,12 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     # Inputs saved in these vectors to conserve memory/avoid unnecessary re-computation
     if parallel
         @timeit to "(parallel) using vectors of component terms to calc weights" begin
-        coeff_terms = SharedArray{Float64}(n_particles)
-        log_e_1_terms = SharedArray{Float64}(n_particles)
-        log_e_2_terms = SharedArray{Float64}(n_particles)
-        ϵ = SharedArray{Float64}(n_shocks, n_particles)
-        s_t_nontempered = SharedArray(similar(s_lag_tempered))
+            coeff_terms = SharedArray{Float64}(n_particles)
+            log_e_1_terms = SharedArray{Float64}(n_particles)
+            log_e_2_terms = SharedArray{Float64}(n_particles)
+            ϵ = SharedArray{Float64}(n_shocks, n_particles)
+            s_t_nontempered = SharedArray(similar(s_lag_tempered))
+        end
     else
         @timeit to "(serial) using vectors of component terms to calc weights" begin
         coeff_terms = Vector{Float64}(n_particles)
