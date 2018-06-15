@@ -63,7 +63,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                                                     N_MH::Int = 1, n_particles::Int = 1000,
                                                     n_presample_periods::Int = 0,
                                                     allout::Bool = true, parallel::Bool = false,
-                                                    testing::Bool = false)
+                                                    sharedarrays::Bool = false, testing::Bool = false)
     #--------------------------------------------------------------
     # Setup
     #--------------------------------------------------------------
@@ -125,7 +125,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     #--------------------------------------------------------------
 
     # Draw initial particles from the distribution of s₀: N(s₀, P₀)
-    if parallel
+    if parallel && sharedarrays
         # Convert to SharedArray for upcoming parallel computation
         s_lag_tempered = SharedArray(s_init)
     else
@@ -134,7 +134,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
     # Vectors of the 3 component terms that are used to calculate the weights
     # Inputs saved in these vectors to conserve memory/avoid unnecessary re-computation
-    if parallel
+    if parallel && sharedarrays
         coeff_terms = SharedArray{Float64}(n_particles)
         log_e_1_terms = SharedArray{Float64}(n_particles)
         log_e_2_terms = SharedArray{Float64}(n_particles)
@@ -170,13 +170,13 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         det_HH_t            = det(HH_t)
 
         # Recast repeatedly used arrays as SharedArrays
-        if parallel
+        if parallel && sharedarrays
             y_t = SharedArray(y_t)
             HH_t = SharedArray(HH_t)
         end
 
         #####################################
-        if parallel
+        if parallel && sharedarrays
             @parallel for i in 1:n_particles
                 ϵ[:,i] = rand(F_ϵ)
                 s_t_nontempered[:,i] = Φ(s_lag_tempered[:, i], ϵ[:,i])
@@ -184,6 +184,21 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
                                                                        initialize = true)
             end
+        elseif parallel
+            ϵ = Matrix{Float64}(n_shocks, n_particles)
+            s_t_nontempered = similar(s_lag_tempered)
+            ϵ, s_t_nontempered, coeff_terms, log_e_1_terms, log_e_2_terms =
+            @parallel (vector_reduce) for i in 1:n_particles
+                ε = rand(F_ϵ)
+                s_t_non = Φ(s_lag_tempered[:, i], ε)
+                p_err   = y_t - Ψ_t(s_t_non, zeros(n_obs_t))
+                coeff_term, log_e_1_term, log_e_2_term = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
+                                                                       initialize = true)
+                vector_reshape(ε, s_t_non, coeff_term, log_e_1_term, log_e_2_term)
+            end
+            coeff_terms = squeeze(coeff_terms, 1)
+            log_e_1_terms = squeeze(log_e_1_terms, 1)
+            log_e_2_terms = squeeze(log_e_2_terms, 1)
         else
             # Draw random shock ϵ
             ϵ = rand(F_ϵ, n_particles)
@@ -233,7 +248,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
             count += 1
 
-            if parallel
+            if parallel && sharedarrays
                 # Get error for all particles
                 @parallel for i = 1:n_particles
                     p_err = y_t - Ψ_t(s_t_nontempered[:,i], zeros(n_obs_t))
@@ -241,6 +256,17 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                                                                            p_err, det_HH_t, inv_HH_t,
                                                                                    initialize = false)
                 end
+            elseif parallel
+                coeff_terms, log_e_1_terms, log_e_2_terms =
+                    @parallel (vector_reduce) for i in 1:n_particles
+                        p_err   = y_t - Ψ_t(s_t_non, zeros(n_obs_t))
+                        coeff_term, log_e_1_term, log_e_2_term = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
+                                                                       initialize = true)
+                        vector_reshape(coeff_term, log_e_1_term, log_e_2_term)
+                    end
+                coeff_terms = squeeze(coeff_terms, 1)
+                log_e_1_terms = squeeze(log_e_1_terms, 1)
+                log_e_2_terms = squeeze(log_e_2_terms, 1)
             else
                 p_error = y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles))
                 for i in 1:n_particles
