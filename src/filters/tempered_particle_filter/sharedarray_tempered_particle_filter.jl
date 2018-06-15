@@ -172,7 +172,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         # Recast repeatedly used arrays as SharedArrays
         if parallel
             y_t = SharedArray(y_t)
-            HH_t = SharedArray(y_t)
+            HH_t = SharedArray(HH_t)
         end
 
         #####################################
