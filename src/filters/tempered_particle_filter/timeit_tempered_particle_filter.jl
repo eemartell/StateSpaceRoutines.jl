@@ -108,14 +108,17 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     #--------------------------------------------------------------
 
     # Draw initial particles from the distribution of s₀: N(s₀, P₀)
+    @timeit to "1. timing of converting s_lag_tempered to SharedArray" begin
     s_lag_tempered = s_init
+    end
 
     # Vectors of the 3 component terms that are used to calculate the weights
     # Inputs saved in these vectors to conserve memory/avoid unnecessary re-computation
+    @timeit to "2. using vectors of component terms to calc weights" begin
     coeff_terms = Vector{Float64}(n_particles)
     log_e_1_terms = Vector{Float64}(n_particles)
     log_e_2_terms = Vector{Float64}(n_particles)
-
+    end
     for t = 1:T
 
         tic()
@@ -141,7 +144,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
         #####################################
         if parallel
-            @timeit to "parallel: initialization" begin
+            @timeit to "3. (parallel) Initialization: Computing coeff, log_e_1, log_e_2" begin
                 ϵ = Matrix{Float64}(n_shocks, n_particles)
                 s_t_nontempered = similar(s_lag_tempered)
                 ϵ, s_t_nontempered, coeff_terms, log_e_1_terms, log_e_2_terms =
@@ -158,7 +161,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 log_e_2_terms = squeeze(log_e_2_terms, 1)
             end
         else
-            @timeit to "serial: Initialization: Computing coeff, log_e_1, log_e_2" begin
+            @timeit to "3. (parallel) Initialization: Computing coeff, log_e_1, log_e_2" begin
             # Draw random shock ϵ
             ϵ = rand(F_ϵ, n_particles)
 
@@ -179,7 +182,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
 
         if adaptive
-            @timeit to "Initialization: Computing φ_1 via bisection for inefficiency ratio" begin
+            @timeit to "4. Initialization: Computing φ_1 via bisection for inefficiency ratio" begin
                 init_Ineff_func(φ) =  solve_inefficiency(φ,  coeff_terms,  log_e_1_terms,
                                                          log_e_2_terms,  n_obs_t,
                                                          parallel = false) -  r_star
@@ -193,10 +196,10 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             @show φ_1
             println("------------------------------")
         end
-        @timeit to "Initialization: conducting correction step" begin
+        @timeit to "5. Initialization: conducting correction step" begin
             normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
         end
-        @timeit to "Initialization: conducting selection step" begin
+        @timeit to "6. Initialization: conducting selection step" begin
             s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                            s_t_nontempered, ϵ; resampling_method = resampling_method)
         end
@@ -215,7 +218,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
             count += 1
 
-            @timeit to "Step 2: Computing coefficients, log_e_1, log_e_2" begin
+            @timeit to "7. Step 2: Computing coefficients, log_e_1, log_e_2" begin
             # Get error for all particles
             p_error = y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles))
 
@@ -227,7 +230,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             end
 
             # Define inefficiency function
-            @timeit to "Step 2: compute φ_1" begin
+            @timeit to "8. Step 2: compute φ_1" begin
             init_ineff_func(φ) = solve_inefficiency(φ, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t,
                                                     parallel = false) - r_star
             fphi_interval = [init_ineff_func(φ_old) init_ineff_func(1.0)]
@@ -247,10 +250,10 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             end
             end
             # Correct and resample particles
-            @timeit to "Step 2: correction step" begin
+            @timeit to "9. Step 2: correction step" begin
             normalized_weights, loglik = correction(φ_new, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t)
             end
-            @timeit to "Step 2: selection step" begin
+            @timeit to "10. Step 2: selection step" begin
             s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
                                                            s_t_nontempered, ϵ; resampling_method = resampling_method)
             end
@@ -271,7 +274,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 print("Mutation ")
             end
 
-            @timeit to "Step 2: mutation step" begin
+            @timeit to "11. Step 2: mutation step" begin
             s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
                                                        s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
                                                        parallel = parallel)
@@ -302,7 +305,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     s_lag_tempered = s_t_nontempered
     end
 
-    show(to; allocations=false)
+    show(to; sortby=:name)
     if VERBOSITY[verbose] >= VERBOSITY[:low]
         println("=============================================")
     end
