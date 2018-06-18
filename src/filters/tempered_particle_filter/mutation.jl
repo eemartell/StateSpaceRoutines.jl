@@ -83,7 +83,7 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
 
     return s_out, ϵ_out, accept_rate
 end
-function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::SharedArray{Float64,2},
+function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float64},
                                     det_HH::Float64, inv_HH::Matrix{Float64}, φ_new::S, y_t::SharedArray{S},
                                     s_non::SharedArray{S}, s_init::SharedArray{S}, ϵ_init::SharedArray{S}, c::S, N_MH::Int;
                                     ϵ_testing::Matrix{S} = zeros(0,0), parallel::Bool = false)
