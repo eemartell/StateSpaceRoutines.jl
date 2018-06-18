@@ -282,9 +282,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 @timeit to "7. (parallel no shared) Step 2: Computing coefficients, log_e_1, log_e_2" begin
                 coeff_terms, log_e_1_terms, log_e_2_terms =
                     @parallel (vector_reduce) for i in 1:n_particles
-                        ε = rand(F_ϵ)
-                        s_t_non = Φ(s_lag_tempered[:, i], ε)
-                        p_err   = y_t - Ψ_t(s_t_non, zeros(n_obs_t))
+                        p_err   = y_t - Ψ_t(s_t_nontempered[:,i], zeros(n_obs_t))
                         coeff_term, log_e_1_term, log_e_2_term = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
                                                                        initialize = true)
                         vector_reshape(coeff_term, log_e_1_term, log_e_2_term)
