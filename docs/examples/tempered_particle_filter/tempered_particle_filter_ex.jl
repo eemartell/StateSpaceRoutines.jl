@@ -35,7 +35,7 @@ F_u = Distributions.MvNormal(zeros(size(HH, 1)), HH)
 tuning = Dict(:verbose => :none, :r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
                :N_MH => 1,
               :n_particles => 1000, :n_presample_periods => 0,
-               :allout => true, :parallel => false)
+               :allout => true, :parallel => false, :sharedarrays => false)
 
 # Generation of the initial state draws
 
