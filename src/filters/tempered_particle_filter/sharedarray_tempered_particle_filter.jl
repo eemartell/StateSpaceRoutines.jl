@@ -256,11 +256,10 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                                                                                    initialize = false)
                 end
             elseif parallel
-                coeff_terms, log_e_1_terms, log_e_2_terms =
-                    @parallel (vector_reduce) for i in 1:n_particles
-                        p_err   = y_t - Ψ_t(s_t_nontempered[:,i], zeros(n_obs_t))
-                        coeff_term, log_e_1_term, log_e_2_term = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
-                                                                       initialize = true)
+                coeff_terms, log_e_1_terms, log_e_2_terms = @parallel (vector_reduce) for i in 1:n_particles
+                        p_err = y_t - Ψ_t(s_t_nontempered[:, i], zeros(n_obs_t))
+                        coeff_term, log_e_1_term, log_e_2_term = weight_kernel(φ_old, y_t, p_err, det_HH_t, inv_HH_t,
+                                                                       initialize = false)
                         vector_reshape(coeff_term, log_e_1_term, log_e_2_term)
                     end
                 coeff_terms = squeeze(coeff_terms, 1)

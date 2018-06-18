@@ -280,11 +280,10 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 end
             elseif parallel
                 @timeit to "7. (parallel no shared) Step 2: Computing coefficients, log_e_1, log_e_2" begin
-                coeff_terms, log_e_1_terms, log_e_2_terms =
-                    @parallel (vector_reduce) for i in 1:n_particles
-                        p_err   = y_t - Ψ_t(s_t_nontempered[:,i], zeros(n_obs_t))
-                        coeff_term, log_e_1_term, log_e_2_term = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
-                                                                       initialize = true)
+                coeff_terms, log_e_1_terms, log_e_2_terms = @parallel (vector_reduce) for i in 1:n_particles
+                        p_err = y_t - Ψ_t(s_t_nontempered[:, i], zeros(n_obs_t))
+                        coeff_term, log_e_1_term, log_e_2_term = weight_kernel(φ_old, y_t, p_err, det_HH_t, inv_HH_t,
+                                                                       initialize = false)
                         vector_reshape(coeff_term, log_e_1_term, log_e_2_term)
                     end
                 coeff_terms = squeeze(coeff_terms, 1)
@@ -294,7 +293,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             else
                 @timeit to "7. (serial) Step 2: Computing coefficinets, log_e_1, log_e_2" begin
                 p_error = y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles))
-                for i in 1:n_particles
+                for i in 1:n_particleqs
                     coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t,
                                                                            p_error[:, i], det_HH_t, inv_HH_t,
                                                                                    initialize = false)
