@@ -293,7 +293,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             else
                 @timeit to "7. (serial) Step 2: Computing coefficinets, log_e_1, log_e_2" begin
                 p_error = y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles))
-                for i in 1:n_particleqs
+                for i in 1:n_particles
                     coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t,
                                                                            p_error[:, i], det_HH_t, inv_HH_t,
                                                                                    initialize = false)
