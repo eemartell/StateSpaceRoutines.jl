@@ -350,8 +350,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             end
 
             @timeit to "11. Step 2: mutation step" begin
-            println("F_ϵ",typeof(F_ϵ.Σ.mat))
-            println("HH_t",typeof(HH_t))
+
             s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
                                                        s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
                                                        parallel = parallel)
