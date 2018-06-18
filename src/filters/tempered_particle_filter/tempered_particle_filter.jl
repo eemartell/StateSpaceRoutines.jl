@@ -196,6 +196,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             end
             end
         elseif parallel
+            @timeit to "3. (parallel no shared) Initialization: Computing coeff, log_e_1, log_e_2" begin
             ϵ = Matrix{Float64}(n_shocks, n_particles)
             s_t_nontempered = similar(s_lag_tempered)
             ϵ, s_t_nontempered, coeff_terms, log_e_1_terms, log_e_2_terms =
@@ -210,6 +211,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             coeff_terms = squeeze(coeff_terms, 1)
             log_e_1_terms = squeeze(log_e_1_terms, 1)
             log_e_2_terms = squeeze(log_e_2_terms, 1)
+            end
         else
             @timeit to "3. (serial) Initialization: Computing coeff, log_e_1, log_e_2" begin
             # Draw random shock ϵ
@@ -277,6 +279,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 end
                 end
             elseif parallel
+                @timeit to "7. (parallel no shared) Step 2: Computing coefficients, log_e_1, log_e_2" begin
                 coeff_terms, log_e_1_terms, log_e_2_terms =
                     @parallel (vector_reduce) for i in 1:n_particles
                         ε = rand(F_ϵ)
@@ -289,6 +292,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                 coeff_terms = squeeze(coeff_terms, 1)
                 log_e_1_terms = squeeze(log_e_1_terms, 1)
                 log_e_2_terms = squeeze(log_e_2_terms, 1)
+                end
             else
                 @timeit to "7. (serial) Step 2: Computing coefficinets, log_e_1, log_e_2" begin
                 p_error = y_t .- Ψ_bcast_t(s_t_nontempered, zeros(n_obs_t, n_particles))
