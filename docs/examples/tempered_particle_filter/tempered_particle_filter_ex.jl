@@ -35,7 +35,7 @@ F_u = Distributions.MvNormal(zeros(size(HH, 1)), HH)
 
 tuning = Dict(:verbose => :none, :r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
               :N_MH => 1, :n_particles => 1000, :n_presample_periods => 0,
-              :allout => true, :parallel => true, :sharedarrays => true,
+              :allout => true, :parallel => false, :sharedarrays => false, :threads => false,
               :timing => false)
 
 # Generation of the initial state draws
@@ -47,9 +47,9 @@ U, E, V = svd(P0)
 s_init = s0 .+ U*diagm(sqrt.(E))*randn(n_states, tuning[:n_particles])
 end
 tempered_particle_filter(data, Φ, Ψ, F_ϵ, F_u, s_init; tuning...)
-@everywhere tuning[:timing] = true
-#to = TimerOutput()
-#@timeit to "test" begin
+# @everywhere tuning[:timing] = true
+to = TimerOutput()
+@timeit to "test" begin
 tempered_particle_filter(data, Φ, Ψ, F_ϵ, F_u, s_init; tuning...)
-#end
-#show(to; sortby=:name)
+end
+show(to; sortby=:name)
