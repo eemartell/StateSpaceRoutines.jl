@@ -68,21 +68,15 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
         end
         accept_vec = squeeze(accept_vec, 1)
     elseif threads
-        ϵ_new = similar(ϵ_init)
-        for i in 1:n_particles
-            ϵ_new[:,i] = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
-        end
         for i = 1:n_particles
+            ϵ_new = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
             s_out[:,i], ϵ_out[:,i], accept_vec[i] = mh_step(Φ, Ψ, y_t, s_init[:,i], s_non[:,i], ϵ_init[:,i],
-                                                            ϵ_new[:,i], φ_new, det_HH, inv_HH, n_obs, n_states,
+                                                            ϵ_new, φ_new, det_HH, inv_HH, n_obs, n_states,
                                                             N_MH; testing = testing)
         end
     else
-        ϵ_new = similar(ϵ_init)
-        for i in 1:n_particles
-            ϵ_new[:,i] = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
-        end
         for i = 1:n_particles
+            ϵ_new = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
             s_out[:,i], ϵ_out[:,i], accept_vec[i] = mh_step(Φ, Ψ, y_t, s_init[:,i], s_non[:,i], ϵ_init[:,i],
                                                             ϵ_new[:,i], φ_new, det_HH, inv_HH, n_obs, n_states,
                                                             N_MH; testing = testing)
@@ -97,7 +91,7 @@ end
 function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float64},
                                     det_HH::Float64, inv_HH::Matrix{Float64}, φ_new::S, y_t::SharedArray{S},
                                     s_non::SharedArray{S}, s_init::SharedArray{S}, ϵ_init::SharedArray{S}, c::S, N_MH::Int;
-                                    ϵ_testing::Matrix{S} = zeros(0,0), parallel::Bool = false, threads:Bool = false)
+                                    ϵ_testing::Matrix{S} = zeros(0,0), parallel::Bool = false, threads::Bool = false)
     #------------------------------------------------------------------------
     # Setup
     #------------------------------------------------------------------------
