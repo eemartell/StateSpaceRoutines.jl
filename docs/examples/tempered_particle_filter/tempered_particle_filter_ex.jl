@@ -1,3 +1,4 @@
+@everywhere begin
 using BenchmarkTools
 using DSGE, StateSpaceRoutines
 using QuantEcon: solve_discrete_lyapunov
@@ -7,7 +8,7 @@ using DataFrames
 
 m = AnSchorfheide()
 df = readtable("us.txt", header = false, separator = ' ')
-@everywhere data = convert(Matrix{Float64}, df)'
+data = convert(Matrix{Float64}, df)'
 
 params = [2.09, 0.98, 2.25, 0.65, 0.34, 3.16, 0.51, 0.81, 0.98, 0.93, 0.19, 0.65, 0.24,
           0.115985, 0.294166, 0.447587]
@@ -24,19 +25,18 @@ DD      = system[:DD]
 ZZ      = system[:ZZ]
 QQ      = system[:QQ]
 
-@everywhere Φ(s_t::Vector{Float64}, ϵ_t::Vector{Float64}) = TTT*s_t + RRR*ϵ_t + CCC
-@everywhere Ψ(s_t::Vector{Float64}, u_t::Vector{Float64}) = ZZ*s_t + DD + u_t
+Φ(s_t::Vector{Float64}, ϵ_t::Vector{Float64}) = TTT*s_t + RRR*ϵ_t + CCC
+Ψ(s_t::Vector{Float64}, u_t::Vector{Float64}) = ZZ*s_t + DD + u_t
 
-@everywhere F_ϵ = Distributions.MvNormal(zeros(size(QQ, 1)), QQ)
-@everywhere F_u = Distributions.MvNormal(zeros(size(HH, 1)), HH)
+F_ϵ = Distributions.MvNormal(zeros(size(QQ, 1)), QQ)
+F_u = Distributions.MvNormal(zeros(size(HH, 1)), HH)
 
 # Tuning of the tempered particle filter algorithm
 
-@everywhere tuning = Dict(:verbose => :none, :r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
-               :N_MH => 1,
-
-:n_particles => 1000, :n_presample_periods => 0,
-               :allout => true, :parallel => false, :sharedarrays => false)
+tuning = Dict(:verbose => :none, :r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
+              :N_MH => 1, :n_particles => 1000, :n_presample_periods => 0,
+              :allout => true, :parallel => false, :sharedarrays => false,
+              :timing => false)
 
 # Generation of the initial state draws
 
@@ -44,15 +44,8 @@ n_states = n_states_augmented(m)
 s0 = zeros(n_states)
 P0 = solve_discrete_lyapunov(TTT, RRR*QQ*RRR')
 U, E, V = svd(P0)
-@everywhere s_init = s0 .+ U*diagm(sqrt.(E))*randn(n_states, tuning[:n_particles])
-
+s_init = s0 .+ U*diagm(sqrt.(E))*randn(n_states, tuning[:n_particles])
+end
 tempered_particle_filter(data, Φ, Ψ, F_ϵ, F_u, s_init; tuning...)
-
-#@everywhere tuning = Dict(:verbose => :none, :r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
-#               :N_MH => 1,
-#              :n_particles => 1000, :n_presample_periods => 0,
-#               :allout => true, :parallel => true, :sharedarrays => false, :timing => true)
-
 tuning[:timing] = true
-
 tempered_particle_filter(data, Φ, Ψ, F_ϵ, F_u, s_init; tuning...)
