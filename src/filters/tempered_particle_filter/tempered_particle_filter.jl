@@ -127,7 +127,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     #--------------------------------------------------------------
 
     # Draw initial particles from the distribution of s₀: N(s₀, P₀)
-    if parallel && sharedarrays
+    if sharedarrays
         # Convert to SharedArray for upcoming parallel computation
         @timeit to "1. (shared arrays) timing of converting s_lag_tempered to SharedArray" begin
         s_lag_tempered = SharedArray(s_init)
@@ -140,7 +140,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
     # Vectors of the 3 component terms that are used to calculate the weights
     # Inputs saved in these vectors to conserve memory/avoid unnecessary re-computation
-    if parallel && sharedarrays
+    if sharedarrays
         @timeit to "2. (shared arrays) using vectors of component terms to calc weights" begin
             coeff_terms = SharedArray{Float64}(n_particles)
             log_e_1_terms = SharedArray{Float64}(n_particles)
@@ -180,9 +180,8 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
         det_HH_t            = det(HH_t)
 
         # Recast repeatedly used arrays as SharedArrays
-        if parallel && sharedarrays
+        if sharedarrays
             y_t = SharedArray(y_t)
-            HH_t = SharedArray(HH_t)
         end
 
         #####################################
@@ -215,13 +214,13 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             end
         elseif threads && sharedarrays
             @timeit to "3. (thread shared arrays) Initialization: Computing coeff, log_e_1, log_e_2" begin
-                Threads.@threads for i = 1:n_particles
-                    ϵ[:, i] = rand(F_ϵ)
-                    s_t_nontempered[:, i] = Φ(s_lag_tempered[:, i], ϵ[:, i])
-                    p_err = y_t - Ψ_t(s_t_nontempered[:, i], zeros(n_obs_t))
-                    coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
-                                                                       initialize = true)
-                end
+            Threads.@threads for i = 1:n_particles
+                ϵ[:, i] = rand(F_ϵ)
+                s_t_nontempered[:, i] = Φ(s_lag_tempered[:, i], ϵ[:, i])
+                p_err = y_t - Ψ_t(s_t_nontempered[:, i], zeros(n_obs_t))
+                coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
+                                                                   initialize = true)
+            end
             end
         elseif threads
             @timeit to "3. (thread no shared) Initialization: Computing coeff, log_e_1, log_e_2" begin
