@@ -78,7 +78,7 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
         for i = 1:n_particles
             ϵ_new = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
             s_out[:,i], ϵ_out[:,i], accept_vec[i] = mh_step(Φ, Ψ, y_t, s_init[:,i], s_non[:,i], ϵ_init[:,i],
-                                                            ϵ_new[:,i], φ_new, det_HH, inv_HH, n_obs, n_states,
+                                                            ϵ_new, φ_new, det_HH, inv_HH, n_obs, n_states,
                                                             N_MH; testing = testing)
         end
     end
@@ -133,14 +133,11 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
     else
         # Initialize acceptance counter to zero
         accept_vec = zeros(n_particles)
-
-        ϵ_new = similar(ϵ_init)
-        for i in 1:n_particles
-            ϵ_new[:,i] = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
         end
         for i = 1:n_particles
+            ϵ_new = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
             s_out[:,i], ϵ_out[:,i], accept_vec[i] = mh_step(Φ, Ψ, y_t, s_init[:,i], s_non[:,i], ϵ_init[:,i],
-                                                            ϵ_new[:,i], φ_new, det_HH, inv_HH, n_obs, n_states,
+                                                            ϵ_new, φ_new, det_HH, inv_HH, n_obs, n_states,
                                                             N_MH; testing = testing)
         end
     end
