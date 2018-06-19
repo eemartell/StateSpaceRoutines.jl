@@ -59,7 +59,7 @@ function solve_inefficiency{S<:AbstractFloat}(φ_new::S, coeff_terms::Vector{Flo
 end
 
 function solve_inefficiency{S<:AbstractFloat}(φ_new::S, coeff_terms::SharedArray{Float64,1}, exp_1_terms::SharedArray{Float64,1},
-                                              exp_2_terms::SharedArray{Float64,1}, n_obs::Int64; parallel::Bool = false)
+                                              exp_2_terms::SharedArray{Float64,1}, n_obs::Int64; parallel::Bool = false, threads::Bool = false)
 
     n_particles = length(coeff_terms)
 

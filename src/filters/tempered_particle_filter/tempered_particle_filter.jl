@@ -271,7 +271,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             println("------------------------------")
         end
         @timeit to "5. Initialization: conducting correction step" begin
-        normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t, parallel = parallel)
+        normalized_weights, loglik = correction(φ_1, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t, parallel = parallel, threads = threads)
         end
         @timeit to "6. Initialization: conducting selection step" begin
         s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
@@ -294,24 +294,43 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             if parallel && sharedarrays
                 @timeit to "7. (parallel) Step 2: Computing coefficients, log_e_1, log_e_2" begin
                 # Get error for all particles
-                @parallel for i = 1:n_particles
-                    p_err = y_t - Ψ_t(s_t_nontempered[:,i], zeros(n_obs_t))
-                    coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t,
+                    @parallel for i = 1:n_particles
+                        p_err = y_t - Ψ_t(s_t_nontempered[:,i], zeros(n_obs_t))
+                        coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t,
                                                                            p_err, det_HH_t, inv_HH_t,
                                                                                    initialize = false)
-                end
+                    end
                 end
             elseif parallel
                 @timeit to "7. (parallel no shared) Step 2: Computing coefficients, log_e_1, log_e_2" begin
-                coeff_terms, log_e_1_terms, log_e_2_terms = @parallel (vector_reduce) for i in 1:n_particles
+                    coeff_terms, log_e_1_terms, log_e_2_terms = @parallel (vector_reduce) for i in 1:n_particles
                         p_err = y_t - Ψ_t(s_t_nontempered[:, i], zeros(n_obs_t))
-                        coeff_term, log_e_1_term, log_e_2_term = weight_kernel(φ_old, y_t, p_err, det_HH_t, inv_HH_t,
-                                                                       initialize = false)
+                        coeff_term, log_e_1_term, log_e_2_term = weight_kernel(φ_old, y_t, p_err,
+                                                                               det_HH_t, inv_HH_t,
+                                                                               initialize = false)
                         vector_reshape(coeff_term, log_e_1_term, log_e_2_term)
                     end
-                coeff_terms = squeeze(coeff_terms, 1)
-                log_e_1_terms = squeeze(log_e_1_terms, 1)
-                log_e_2_terms = squeeze(log_e_2_terms, 1)
+                    coeff_terms = squeeze(coeff_terms, 1)
+                    log_e_1_terms = squeeze(log_e_1_terms, 1)
+                    log_e_2_terms = squeeze(log_e_2_terms, 1)
+                end
+            elseif threads && sharedarrays
+                @timeit to "7. (thread shared arrays) Step 2: Computing coefficients, log_e_1, log_e_2" begin
+                    Threads.@threads for i = 1:n_particles
+                        p_err = y_t - Ψ_t(s_t_nontempered[:, i], zeros(n_obs_t))
+                        coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t, p_err,
+                                                                                           det_HH_t, inv_HH_t,
+                                                                                           initialize = false)
+                    end
+                end
+            elseif threads
+                @timeit to "7. (thread no shared) Step 2: Computing coefficients, log_e_1, log_e_2" begin
+                    Threads.@threads for i = 1:n_particles
+                        p_err = y_t - Ψ_t(s_t_nontempered[:, i], zeros(n_obs_t))
+                        coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(φ_old, y_t, p_err,
+                                                                                           det_HH_t, inv_HH_t,
+                                                                                           initialize = false)
+                    end
                 end
             else
                 @timeit to "7. (serial) Step 2: Computing coefficinets, log_e_1, log_e_2" begin
@@ -327,7 +346,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             # Define inefficiency function
             @timeit to "8. Step 2: compute φ_1" begin
             init_ineff_func(φ) = solve_inefficiency(φ, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t,
-                                                    parallel = parallel) - r_star
+                                                    parallel = parallel, threads = threads) - r_star
             fphi_interval = [init_ineff_func(φ_old) init_ineff_func(1.0)]
 
             # The below boolean checks that a solution exists within interval
@@ -346,7 +365,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
             # Correct and resample particles
             @timeit to "9. Step 2: correction step" begin
-            normalized_weights, loglik = correction(φ_new, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t, parallel = parallel)
+            normalized_weights, loglik = correction(φ_new, coeff_terms, log_e_1_terms, log_e_2_terms, n_obs_t, parallel = parallel, threads = threads)
             end
             @timeit to "10. Step 2: selection step" begin
             s_lag_tempered, s_t_nontempered, ϵ = selection(normalized_weights, s_lag_tempered,
@@ -373,7 +392,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
 
             s_t_nontempered, ϵ, accept_rate = mutation(Φ, Ψ_t, F_ϵ.Σ.mat, det_HH_t, inv_HH_t, φ_new, y_t,
                                                        s_t_nontempered, s_lag_tempered, ϵ, c, N_MH;
-                                                       parallel = parallel)
+                                                       parallel = parallel, threads = threads)
 
             end
             # if VERBOSITY[verbose] >= VERBOSITY[:high]
