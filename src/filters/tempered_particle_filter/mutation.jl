@@ -122,6 +122,9 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
             accept
         end
     elseif threads
+        # Initialize acceptance counter to zero
+        accept_vec = zeros(n_particles)
+
         s_out = SharedArray(s_out)
         ϵ_out = SharedArray(ϵ_out)
         for i = 1:n_particles
@@ -133,7 +136,6 @@ function mutation{S<:AbstractFloat}(Φ::Function, Ψ::Function, QQ::Matrix{Float
     else
         # Initialize acceptance counter to zero
         accept_vec = zeros(n_particles)
-        end
         for i = 1:n_particles
             ϵ_new = rand(MvNormal(ϵ_init[:,i], c^2*QQ))
             s_out[:,i], ϵ_out[:,i], accept_vec[i] = mh_step(Φ, Ψ, y_t, s_init[:,i], s_non[:,i], ϵ_init[:,i],
