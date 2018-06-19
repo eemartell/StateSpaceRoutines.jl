@@ -34,8 +34,9 @@ QQ      = system[:QQ]
 
 @everywhere tuning = Dict(:verbose => :none, :r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
                :N_MH => 1,
-              :n_particles => 1000, :n_presample_periods => 0,
-               :allout => true, :parallel => true, :sharedarrays => false)
+
+:n_particles => 1000, :n_presample_periods => 0,
+               :allout => true, :parallel => false, :sharedarrays => false)
 
 # Generation of the initial state draws
 
@@ -44,4 +45,14 @@ s0 = zeros(n_states)
 P0 = solve_discrete_lyapunov(TTT, RRR*QQ*RRR')
 U, E, V = svd(P0)
 @everywhere s_init = s0 .+ U*diagm(sqrt.(E))*randn(n_states, tuning[:n_particles])
+
+tempered_particle_filter(data, Φ, Ψ, F_ϵ, F_u, s_init; tuning...)
+
+#@everywhere tuning = Dict(:verbose => :none, :r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
+#               :N_MH => 1,
+#              :n_particles => 1000, :n_presample_periods => 0,
+#               :allout => true, :parallel => true, :sharedarrays => false, :timing => true)
+
+tuning[:timing] = true
+
 tempered_particle_filter(data, Φ, Ψ, F_ϵ, F_u, s_init; tuning...)

@@ -64,7 +64,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                                                     N_MH::Int = 1, n_particles::Int = 1000,
                                                     n_presample_periods::Int = 0,
                                                     allout::Bool = true, parallel::Bool = false,
-                                                    sharedarrays::Bool = false, testing::Bool = false)
+                                                    sharedarrays::Bool = false, testing::Bool = false, timing::Bool = false)
     #--------------------------------------------------------------
     # Setup
     #--------------------------------------------------------------
@@ -379,7 +379,9 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     s_lag_tempered = s_t_nontempered
     end
 
-    show(to; sortby=:name)
+    if timing
+        show(to; sortby=:name)
+    end
 
     if VERBOSITY[verbose] >= VERBOSITY[:low]
         println("=============================================")
