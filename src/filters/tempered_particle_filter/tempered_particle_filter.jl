@@ -64,7 +64,8 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
                                                     N_MH::Int = 1, n_particles::Int = 1000,
                                                     n_presample_periods::Int = 0,
                                                     allout::Bool = true, parallel::Bool = false,
-                                                    sharedarrays::Bool = false, testing::Bool = false, timing::Bool = false)
+                                                    sharedarrays::Bool = false, threads = false,
+                                                    testing::Bool = false, timing::Bool = false)
     #--------------------------------------------------------------
     # Setup
     #--------------------------------------------------------------
@@ -128,11 +129,11 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     # Draw initial particles from the distribution of s₀: N(s₀, P₀)
     if parallel && sharedarrays
         # Convert to SharedArray for upcoming parallel computation
-        @timeit to "1. (parallel) timing of converting s_lag_tempered to SharedArray" begin
+        @timeit to "1. (shared arrays) timing of converting s_lag_tempered to SharedArray" begin
         s_lag_tempered = SharedArray(s_init)
         end
     else
-        @timeit to "1. (serial) timing of s_lag_tempered step" begin
+        @timeit to "1. (not shared arrays) timing of s_lag_tempered step" begin
         s_lag_tempered = s_init
         end
     end
@@ -140,7 +141,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
     # Vectors of the 3 component terms that are used to calculate the weights
     # Inputs saved in these vectors to conserve memory/avoid unnecessary re-computation
     if parallel && sharedarrays
-        @timeit to "2. (parallel) using vectors of component terms to calc weights" begin
+        @timeit to "2. (shared arrays) using vectors of component terms to calc weights" begin
             coeff_terms = SharedArray{Float64}(n_particles)
             log_e_1_terms = SharedArray{Float64}(n_particles)
             log_e_2_terms = SharedArray{Float64}(n_particles)
@@ -148,7 +149,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             s_t_nontempered = SharedArray(similar(s_lag_tempered))
         end
     else
-        @timeit to "2. (serial) using vectors of component terms to calc weights" begin
+        @timeit to "2. (not shared arrays) using vectors of component terms to calc weights" begin
         coeff_terms = Vector{Float64}(n_particles)
         log_e_1_terms = Vector{Float64}(n_particles)
         log_e_2_terms = Vector{Float64}(n_particles)
@@ -212,6 +213,28 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             log_e_1_terms = squeeze(log_e_1_terms, 1)
             log_e_2_terms = squeeze(log_e_2_terms, 1)
             end
+        elseif threads && sharedarrays
+            @timeit to "3. (thread shared arrays) Initialization: Computing coeff, log_e_1, log_e_2" begin
+                Threads.@threads for i = 1:n_particles
+                    ϵ[:, i] = rand(F_ϵ)
+                    s_t_nontempered[:, i] = Φ(s_lag_tempered[:, i], ϵ[:, i])
+                    p_err = y_t - Ψ_t(s_t_nontempered[:, i], zeros(n_obs_t))
+                    coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
+                                                                       initialize = true)
+                end
+            end
+        elseif threads
+            @timeit to "3. (thread no shared) Initialization: Computing coeff, log_e_1, log_e_2" begin
+                ϵ = Matrix{Float64}(n_shocks, n_particles)
+                s_t_nontempered = similar(s_lag_tempered)
+                Threads.@threads for i = 1:n_particles
+                    ϵ[:, i] = rand(F_ϵ)
+                    s_t_nontempered[:, i] = Φ(s_lag_tempered[:, i], ϵ[:, i])
+                    p_err = y_t - Ψ_t(s_t_nontempered[:, i], zeros(n_obs_t))
+                    coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i] = weight_kernel(0., y_t, p_err, det_HH_t, inv_HH_t,
+                                                                       initialize = true)
+                end
+            end
         else
             @timeit to "3. (serial) Initialization: Computing coeff, log_e_1, log_e_2" begin
             # Draw random shock ϵ
@@ -236,7 +259,7 @@ function tempered_particle_filter{S<:AbstractFloat}(data::Matrix{S}, Φ::Functio
             @timeit to "4. Initialization: Computing φ_1 via bisection for inefficiency ratio" begin
             init_Ineff_func(φ) =  solve_inefficiency(φ,  coeff_terms,  log_e_1_terms,
                                                      log_e_2_terms,  n_obs_t,
-                                                    parallel = parallel) -  r_star
+                                                    parallel = parallel, threads = threads) -  r_star
             φ_1 =  bisection(init_Ineff_func, 1e-30, 1.0, tol =  tol)
             end
         else

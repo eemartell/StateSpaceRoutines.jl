@@ -34,13 +34,18 @@ Where ∑ is over j=1...M particles, and incremental weight is:
 
 """
 function solve_inefficiency{S<:AbstractFloat}(φ_new::S, coeff_terms::Vector{Float64}, exp_1_terms::Vector{Float64},
-                                              exp_2_terms::Vector{Float64}, n_obs::Int64; parallel::Bool = false)
+                                              exp_2_terms::Vector{Float64}, n_obs::Int64; parallel::Bool = false, threads::Bool = false)
 
     n_particles = length(coeff_terms)
 
     if parallel
         w = @parallel (vcat) for i = 1:n_particles
             incremental_weight(φ_new, coeff_terms[i], exp_1_terms[i], exp_2_terms[i], n_obs)
+        end
+    elseif threads
+        w = Vector{Float64}(n_particles)
+        Threads.@threads for i = 1:n_particles
+            w[i] = incremental_weight(φ_new, coeff_terms[i], exp_1_terms[i], exp_2_terms[i], n_obs)
         end
     else
         w = Vector{Float64}(n_particles)
@@ -61,6 +66,11 @@ function solve_inefficiency{S<:AbstractFloat}(φ_new::S, coeff_terms::SharedArra
     if parallel
         w = @parallel (vcat) for i = 1:n_particles
             incremental_weight(φ_new, coeff_terms[i], exp_1_terms[i], exp_2_terms[i], n_obs)
+        end
+    elseif threads
+        w = Vector{Float64}(n_particles)
+        Threads.@threads for i = 1:n_particles
+            w[i] = incremental_weight(φ_new, coeff_terms[i], exp_1_terms[i], exp_2_terms[i], n_obs)
         end
     else
         w = Vector{Float64}(n_particles)
