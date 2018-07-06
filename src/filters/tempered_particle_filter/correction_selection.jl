@@ -1,56 +1,107 @@
-"""
-```
-correction_selection!(φ_new::Float64, φ_old::Float64, y_t::Vector{Float64}, p_error::Matrix{Float64},
-s_lag_tempered::Matrix{Float64}, ε::Matrix{Float64}, HH::Matrix{Float64}, n_particles::Int;
-    initialize::Bool=false)
-```
-Calculate densities, normalize and reset weights, call multinomial resampling, update state and
-error vectors, reset error vectors to 1,and calculate new log likelihood.
+# """
+# ```
+# correction_selection!(φ_new::Float64, φ_old::Float64, y_t::Vector{Float64}, p_error::Matrix{Float64},
+# s_lag_tempered::Matrix{Float64}, ε::Matrix{Float64}, HH::Matrix{Float64}, n_particles::Int;
+    # initialize::Bool=false)
+# ```
+# Calculate densities, normalize and reset weights, call multinomial resampling, update state and
+# error vectors, reset error vectors to 1,and calculate new log likelihood.
 
-### Inputs
-- `φ_new::Float64`: current φ
-- `φ_old::Float64`: φ from last tempering iteration
-- `y_t::Vector{Float64}`: (`n_observables` x 1) vector of observables at time t
-- `p_error::Vector{Float64}`: A single particle's error: y_t - Ψ(s_t)
-- `HH::Matrix{Float64}`: measurement error covariance matrix, ∑ᵤ
-- `n_particles::Int`: number of particles
+# ### Inputs
+# - `φ_new::Float64`: current φ
+# - `φ_old::Float64`: φ from last tempering iteration
+# - `y_t::Vector{Float64}`: (`n_observables` x 1) vector of observables at time t
+# - `p_error::Vector{Float64}`: A single particle's error: y_t - Ψ(s_t)
+# - `HH::Matrix{Float64}`: measurement error covariance matrix, ∑ᵤ
+# - `n_particles::Int`: number of particles
 
-### Keyword Arguments
-- `initialize::Bool`: Flag indicating whether one is solving for incremental weights during
-    the initialization of weights; default is `false`.
+# ### Keyword Arguments
+# - `initialize::Bool`: Flag indicating whether one is solving for incremental weights during
+    # the initialization of weights; default is `false`.
 
-### Outputs
-- `loglik`: incremental log likelihood
-- `id`: vector of indices corresponding to resampled particles
-"""
-function correction_selection!(φ_new::Float64, φ_old::Float64, y_t::Vector{Float64},
-                               p_error::Matrix{Float64}, HH::Matrix{Float64}, n_particles::Int;
-                               initialize::Bool = false, parallel::Bool = false,
-                               resampling_method::Symbol = :multinomial)
-    # Initialize vector
-    incremental_weights = zeros(n_particles)
+# ### Outputs
+# - `loglik`: incremental log likelihood
+# - `id`: vector of indices corresponding to resampled particles
+# """
 
-    # Calculate initial weights
+function correction(φ_new::Float64, coeff_terms::Vector{Float64}, log_e_1_terms::Vector{Float64},
+                    log_e_2_terms::Vector{Float64}, n_obs::Int64; parallel::Bool = false,
+                    threads::Bool = false)
+    n_particles = length(coeff_terms)
     if parallel
-        incremental_weights = @sync @parallel (vcat) for n = 1:n_particles
-            incremental_weight(φ_new, φ_old, y_t, p_error[:,n], HH, initialize=initialize)
+        incremental_weights = @parallel (vcat) for i = 1:n_particles
+            incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
+        end
+    elseif threads
+        incremental_weights = Vector{Float64}(n_particles)
+        Threads.@threads for i = 1:n_particles
+            incremental_weights[i] = incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
         end
     else
-        for n = 1:n_particles
-            incremental_weights[n] = incremental_weight(φ_new, φ_old, y_t, p_error[:,n], HH,
-                                                        initialize = initialize)
+        incremental_weights = Vector{Float64}(n_particles)
+        for i = 1:n_particles
+            incremental_weights[i] = incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
         end
     end
-
-    # Normalize weights
     normalized_weights = incremental_weights ./ mean(incremental_weights)
-
-    # Resampling
-    id = resample(normalized_weights, method = resampling_method, parallel = parallel)
 
     # Calculate likelihood
     loglik = log(mean(incremental_weights))
 
-    return loglik, id
+    return normalized_weights, loglik
+end
+function correction(φ_new::Float64, coeff_terms::SharedArray{Float64,1}, log_e_1_terms::SharedArray{Float64,1},
+                    log_e_2_terms::SharedArray{Float64,1}, n_obs::Int64; parallel::Bool = false,
+                    threads::Bool = false)
+    n_particles = length(coeff_terms)
+    if parallel
+        incremental_weights = @parallel (vcat) for i = 1:n_particles
+            incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
+        end
+    elseif threads
+        incremental_weights = Vector{Float64}(n_particles)
+        Threads.@threads for i = 1:n_particles
+            incremental_weights[i] = incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
+        end
+    else
+        incremental_weights = Vector{Float64}(n_particles)
+        for i = 1:n_particles
+            incremental_weights[i] = incremental_weight(φ_new, coeff_terms[i], log_e_1_terms[i], log_e_2_terms[i], n_obs)
+        end
+    end
+    normalized_weights = incremental_weights ./ mean(incremental_weights)
+
+    # Calculate likelihood
+    loglik = log(mean(incremental_weights))
+
+    return normalized_weights, loglik
 end
 
+function selection(normalized_weights::Vector{Float64}, s_lag_tempered::Matrix{Float64},
+                   s_t_nontempered::Matrix{Float64}, ϵ::Matrix{Float64};
+                   resampling_method::Symbol = :multinomial)
+    # Resampling
+    id = resample(normalized_weights, method = resampling_method)
+
+    # Update arrays for resampled indices
+    s_lag_tempered  = s_lag_tempered[:,id]
+    s_t_nontempered = s_t_nontempered[:,id]
+    ϵ               = ϵ[:,id]
+
+    return s_lag_tempered, s_t_nontempered, ϵ
+end
+function selection(normalized_weights::Vector{Float64}, s_lag_tempered::SharedArray{Float64,2},
+                   s_t_nontempered::SharedArray{Float64,2}, ϵ::SharedArray{Float64,2};
+                   resampling_method::Symbol = :multinomial)
+    # Resampling
+    id = SharedArray(resample(normalized_weights, method = resampling_method))
+
+    # Update shared arrays for resampled indices
+    @parallel for i in 1:length(id)
+        s_lag_tempered[:,i] = s_lag_tempered[:,id[i]]
+        s_t_nontempered[:,i] = s_t_nontempered[:,id[i]]
+        ϵ[:,i] = ϵ[:,id[i]]
+    end
+
+    return s_lag_tempered, s_t_nontempered, ϵ
+end

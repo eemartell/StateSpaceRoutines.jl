@@ -1,3 +1,5 @@
+@everywhere begin
+using TimerOutputs
 using DSGE, StateSpaceRoutines
 using QuantEcon: solve_discrete_lyapunov
 using DataFrames
@@ -31,10 +33,10 @@ F_u = Distributions.MvNormal(zeros(size(HH, 1)), HH)
 
 # Tuning of the tempered particle filter algorithm
 
-tuning = Dict(:r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
-              :xtol => 0., :resampling_method => :systematic, :N_MH => 1,
-              :n_particles => 1000, :n_presample_periods => 0,
-              :adaptive => true, :allout => true, :parallel => false)
+tuning = Dict(:verbose => :none, :r_star => 2., :c => 0.3, :accept_rate => 0.4, :target => 0.4,
+              :N_MH => 1, :n_particles => 1000, :n_presample_periods => 0,
+              :allout => true, :parallel => false, :sharedarrays => true, :threads => true,
+              :timing => false)
 
 # Generation of the initial state draws
 
@@ -43,4 +45,19 @@ s0 = zeros(n_states)
 P0 = solve_discrete_lyapunov(TTT, RRR*QQ*RRR')
 U, E, V = svd(P0)
 s_init = s0 .+ U*diagm(sqrt.(E))*randn(n_states, tuning[:n_particles])
+end
+
+# Compile functions
 tempered_particle_filter(data, Φ, Ψ, F_ϵ, F_u, s_init; tuning...)
+
+# Test time of inside steps
+@everywhere tuning[:timing] = true
+tempered_particle_filter(data, Φ, Ψ, F_ϵ, F_u, s_init; tuning...)
+
+# Test time of entire function
+@everywhere tuning[:timing] = false
+to = TimerOutput()
+@timeit to "test" begin
+tempered_particle_filter(data, Φ, Ψ, F_ϵ, F_u, s_init; tuning...)
+end
+show(to; sortby=:name)
