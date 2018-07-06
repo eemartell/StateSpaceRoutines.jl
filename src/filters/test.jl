@@ -7,7 +7,7 @@ function compute_values(y::Matrix{S},
     outputs::Vector{Symbol} = [:loglh, :pred, :filt],
     Nt0::Int = 0) where {S<:AbstractFloat}
 
-    true_ll, ~, ~, ~, ~, ~, ~, ~, ~ = kalman_filter(Nt, y,T,R,C,Q,Z,D,E,s_0,P_0)
+    true_ll, ~, ~, ~, P_filt, ~, ~, ~, ~ = kalman_filter(Nt, y,T,R,C,Q,Z,D,E,s_0,P_0)
 
     #Number of time periods for which we have data
     Nt = size(y,2)
