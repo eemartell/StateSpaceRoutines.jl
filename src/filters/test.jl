@@ -1,3 +1,5 @@
+#returns a vector of norms || Pt|t-1 - Pt-1|t-2 || (abs val of maximum of bitwise differences), and a vector of change in likelihoods | p(y|θ)-p_t(y|θ) |
+
 function compute_values(y::Matrix{S},
     T::Matrix{S}, R::Matrix{S}, C::Vector{S},
     Q::Matrix{S}, Z::Matrix{S}, D::Vector{S}, E::Matrix{S},
@@ -7,22 +9,29 @@ function compute_values(y::Matrix{S},
 
     true_ll, ~, ~, ~, ~, ~, ~, ~, ~ = kalman_filter(Nt, y,T,R,C,Q,Z,D,E,s_0,P_0)
 
+    #Number of time periods for which we have data
     Nt = size(y,2)
+
     norm = zeros(Nt-1)
     ch_ll = zeros(Nt-1)
 
-    for nt in 1:size(y,2)
+#temp var tracks Pt-1|t-2
+#nt is the t that we start using barT
+    for nt in 1:Nt
         loglh, ~, ~, ~, ~, ~, ~, ~, P_T = kalman_filter(nt,y,T,R,C,Q,Z,D,E,s_0 P_0)
         if nt == 1
             temp = P_T
         else
+            #compute norm
             norm_P_T[nt] = abs(maximum(P_T .- temp))
+            #update temp
             temp = P_Tss
+            #compute change in likelihood
             ch_ll[nt] = abs(true_ll - loglh)
         end
-    return norm, ch_ll
+    return norm_P_T, ch_ll
 
-##
+#updated inputs to track nt
 function kalman_filter(nt::Int64, y::Matrix{S},
     T::Matrix{S}, R::Matrix{S}, C::Vector{S},
     Q::Matrix{S}, Z::Matrix{S}, D::Vector{S}, E::Matrix{S},
@@ -63,7 +72,8 @@ function kalman_filter(nt::Int64, y::Matrix{S},
         end
 
         # Update and compute log-likelihood
-##
+
+# update inputs to track t, nt
         update!(t, nt, k, y[:, t]; return_loglh = return_loglh)
         if return_filt
             s_filt[:,    t] = k.s_t
@@ -100,6 +110,7 @@ function forecast!(k::KalmanFilter{S}) where {S<:AbstractFloat}
     return nothing
 end
 
+#update inputs
 function update!(t::Int64, nt::Int64, k::KalmanFilter{S}, y_obs::Vector{S};
                  return_loglh::Bool = true) where {S<:AbstractFloat}
     # Keep rows of measurement equation corresponding to non-NaN observables
@@ -121,9 +132,11 @@ function update!(t::Int64, nt::Int64, k::KalmanFilter{S}, y_obs::Vector{S};
     PZV = P_pred'*Z'*V_pred_inv
 
     k.s_t = s_pred + PZV*dy       # s_{t|t} = s_{t|t-1} + P_{t|t-1}'*Z'/V_{t|t-1}*dy
-##
-    if t < n_t
+
+    #if t is less than nt, keep updating P_pred as usual
+    if t < nt
         k.P_t = P_pred - PZV*Z*P_pred # P_{t|t} = P_{t|t-1} - P_{t|t-1}'*Z'/V_{t|t-1}*Z*P_{t|t-1}
+    #we are using SS value of P_t
     else
         k.P_t = P_pred
 ##
