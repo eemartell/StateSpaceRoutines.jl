@@ -1,4 +1,4 @@
-#returns a vector of norms || Pt|t-1 - Pt-1|t-2 || (abs val of maximum of bitwise differences), and a vector of change in likelihoods | p(y|θ)-p_t(y|θ) |
+#returns a vector of norms || Pt|t-1 - Pt-1|t-2 ||, and a vector of change in likelihoods | p(y|θ)-p_t(y|θ) |
 
 function compute_values(y::Matrix{S},
     T::Matrix{S}, R::Matrix{S}, C::Vector{S},
@@ -23,13 +23,15 @@ function compute_values(y::Matrix{S},
             temp = P_T
         else
             #compute norm
-            norm_P_T[nt] = abs(maximum(P_T .- temp))
+            norm_P_T[nt] = norm(P_T .- temp, 2)
             #update temp
-            temp = P_Tss
+            temp = P_T
             #compute change in likelihood
             ch_ll[nt] = abs(true_ll - loglh)
         end
+    end
     return norm_P_T, ch_ll
+end
 
 #updated inputs to track nt
 function kalman_filter(nt::Int64, y::Matrix{S},
@@ -139,7 +141,8 @@ function update!(t::Int64, nt::Int64, k::KalmanFilter{S}, y_obs::Vector{S};
     #we are using SS value of P_t
     else
         k.P_t = P_pred
-##
+    end
+
     if return_loglh
         k.loglh_t = -(Ny*log(2π) + log(det(V_pred)) + dy'*V_pred_inv*dy)/2 # p(y_t | y_{1:t-1})
     end
