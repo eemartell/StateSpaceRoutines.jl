@@ -1,4 +1,3 @@
-#returns a vector of norms || Pt|t-1 - Pt-1|t-2 || (abs val of maximum of bitwise differences), and a vector of change in likelihoods | p(y|θ)-p_t(y|θ) |
 
 function compute_values(y::Matrix{S},
     T::Matrix{S}, R::Matrix{S}, C::Vector{S},
@@ -7,29 +6,35 @@ function compute_values(y::Matrix{S},
     outputs::Vector{Symbol} = [:loglh, :pred, :filt],
     Nt0::Int = 0) where {S<:AbstractFloat}
 
-    true_ll, ~, ~, ~, ~, ~, ~, ~, ~ = kalman_filter(Nt, y,T,R,C,Q,Z,D,E,s_0,P_0)
-
     #Number of time periods for which we have data
     Nt = size(y,2)
 
-    norm = zeros(Nt-1)
-    ch_ll = zeros(Nt-1)
+    true_ll, ~, ~, ~, P_filt, ~, ~, ~, ~ = kalman_filter(Nt,y,T,R,C,Q,Z,D,E,s_0,P_0)
 
-#temp var tracks Pt-1|t-2
-#nt is the t that we start using barT
+    norm_P_T = zeros(Nt)
+    ch_ll = zeros(Nt)
+    loglh = zeros(Nt)
+
+    global norm_P_T, ch_ll, true_ll, loglh
+
+    #temp var tracks Pt-1|t-2
+    #nt is the t that we start using barT
+    temp = Array{Float64}(size(P_0)...)
     for nt in 1:Nt
-        loglh, ~, ~, ~, ~, ~, ~, ~, P_T = kalman_filter(nt,y,T,R,C,Q,Z,D,E,s_0 P_0)
+        loglh, ~, ~, ~, ~, ~, ~, ~, P_T = kalman_filter(nt,y,T,R,C,Q,Z,D,E,s_0,P_0)
         if nt == 1
             temp = P_T
         else
             #compute norm
-            norm_P_T[nt] = abs(maximum(P_T .- temp))
+            norm_P_T[nt] = norm(P_T .- temp,2)
             #update temp
-            temp = P_Tss
+            temp = P_T
             #compute change in likelihood
-            ch_ll[nt] = abs(true_ll - loglh)
+            ch_ll[nt] = abs(true_ll[Nt] - loglh[Nt])
         end
-    return norm_P_T, ch_ll
+    end
+    return norm_P_T, ch_ll, true_ll[Nt]
+end
 
 #updated inputs to track nt
 function kalman_filter(nt::Int64, y::Matrix{S},
@@ -139,7 +144,8 @@ function update!(t::Int64, nt::Int64, k::KalmanFilter{S}, y_obs::Vector{S};
     #we are using SS value of P_t
     else
         k.P_t = P_pred
-##
+    end
+
     if return_loglh
         k.loglh_t = -(Ny*log(2π) + log(det(V_pred)) + dy'*V_pred_inv*dy)/2 # p(y_t | y_{1:t-1})
     end
