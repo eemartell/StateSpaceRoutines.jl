@@ -60,7 +60,7 @@ KalmanFilter(T, R, C, Q, Z, D, E, [s_0, P_0])
 
 Outer constructor for the `KalmanFilter` type.
 """
-function KalmanFilter(T::Matrix{S}, R::Matrix{S}, C::Vector{S}, Q::Matrix{S},
+function KalmanFilter(A1::Matrix{S}, R::Matrix{S}, C::Vector{S}, Q::Matrix{S},
                       Z::Matrix{S}, D::Vector{S}, E::Matrix{S},
                       s_0::Vector{S} = Vector{S}(0), P_0::Matrix{S} = Matrix{S}(0, 0)) where {S<:AbstractFloat}
     if isempty(s_0) || isempty(P_0)

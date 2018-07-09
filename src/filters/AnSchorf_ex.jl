@@ -6,8 +6,8 @@ using DSGE
 import DSGE.update!
 using QuantEcon: solve_discrete_lyapunov
 
-include("test.jl")
 include("kalman_filter.jl")
+include("test.jl")
 
 m = AnSchorfheide()
 
@@ -32,6 +32,22 @@ E      = system[:EE]
 n_states = n_states_augmented(m)
 s_0 = zeros(n_states)
 P_0 = solve_discrete_lyapunov(T, R*Q*R')
+# Kalman
+# compute_values(data, T, R, C, Q, Z, D, E, s_0, P_0)
 
-#Kalman
-compute_values(data, T, R, C, Q, Z, D, E, s_0, P_0)
+# Processes for g_t and z_t are both AR(1) and exogenous;
+# monetary policy shock is endogenous b/c depends on endogenous rules,
+# despite the AR(1) shock structure
+M = eye(n_states)
+M[1, 1] = 0; M[1, 6] = 1
+M[6, 6] = 0; M[6, 1] = 1
+M[2, 2] = 0; M[2, 5] = 1
+M[5, 5] = 0; M[5, 2] = 1
+# M[1,1] = 0; M[1, 5] = 1
+# M[5, 5] = 0; M[5, 1] = 1
+# M[2, 2] = 0; M[2, 6] = 1
+# M[6, 6] = 0; M[6, 2] = 1
+Mtild = eye(3) # We preserve orderings of shocks
+@assert false
+output = block_kalman_filter(data, T, R, C, Q, Z, D, E, M, Mtild, s_0, P_0, [2; 0; 0; 6])
+println(sum(output[1]))

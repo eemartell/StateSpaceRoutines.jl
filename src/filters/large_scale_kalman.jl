@@ -22,14 +22,14 @@
 # we want, with the default being a 2-block (1 and 4) filter.
 include("kalman_filter.jl")
 
-function block_kalman_filter(y::Matrix{S}, Ttild::Matrix{S}, Rtild::Matrix{S},
-                             Ctild::Vector{S}, Qtild::Matrix{S}, Ztild::Matrix{S},
-                             Dtild::Vector{S}, Htild::Matrix{S},
-                             s_0tild::Vector{S} = Vector{S}(0),
-                             P_0tild::Matrix{S} = Matrix{S}(0,0),
-                             M::Matrix{S}, Mtild::Matrix{S}, block_dims::Vector{Int64};
+function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::Matrix{Float64},
+                             Ctild::Vector{Float64}, Qtild::Matrix{Float64}, Ztild::Matrix{Float64},
+                             Dtild::Vector{Float64}, Htild::Matrix{Float64},
+                             M::Matrix{Float64}, Mtild::Matrix{Float64}, block_dims::Vector{Int64},
+                             s_0tild::Vector{Float64} = Vector{Float64}(0),
+                             P_0tild::Matrix{Float64} = Matrix{Float64}(0,0);
                              outputs::Vector{Symbol} = [:loglh, :pred, :filt],
-                             Nt0::Int = 0, block_num::Int64 = 2) where {S<:Abstract Float}
+                             Nt0::Int = 0, block_num::Int64 = 2)
     # Re-order matrices and vectors
     T = M' * Ttild * M
     R = M' * Rtild * Mtild
@@ -39,7 +39,7 @@ function block_kalman_filter(y::Matrix{S}, Ttild::Matrix{S}, Rtild::Matrix{S},
     D = Dtild
     H = Htild
     s_0 = M * s_0tild
-    P_0 = M' * P_0tild * Mtild
+    P_0 = M' * P_0tild * M
 
     # Determine outputs
     return_loglh = :loglh in outputs
@@ -53,12 +53,12 @@ function block_kalman_filter(y::Matrix{S}, Ttild::Matrix{S}, Rtild::Matrix{S},
     # Initialize Inputs and outputs
     k = KalmanFilter(T, R, C, Q, Z, D, H, s_0, P_0)
 
-    mynan  = convert(S, NaN)
-    loglh  = return_loglh ? fill(mynan, Nt)         : Vector{S}(0)
-    s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
-    P_pred = return_pred  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
-    s_filt = return_fil   ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
-    P_filt = return_filt  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
+    mynan  = convert(Float64, NaN)
+    loglh  = return_loglh ? fill(mynan, Nt)         : Vector{Float64}(0)
+    s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{Float64}(0, 0)
+    P_pred = return_pred  ? fill(mynan, Ns, Ns, Nt) : Array{Float64, 3}(0, 0, 0)
+    s_filt = return_filt  ? fill(mynan, Ns, Nt)     : Matrix{Float64}(0, 0)
+    P_filt = return_filt  ? fill(mynan, Ns, Ns, Nt) : Array{Float64, 3}(0, 0, 0)
 
     # Populate initial states
     s_0 = k.s_t
@@ -67,14 +67,14 @@ function block_kalman_filter(y::Matrix{S}, Ttild::Matrix{S}, Rtild::Matrix{S},
     # Loop through periods t
     for t = 1:Nt
         # Forecast
-        forecast!(k, block_num)
+        forecast!(k, block_num, block_dims)
         if return_pred
             s_pred[:,    t] = k.s_t
             P_pred[:, :, t] = k.P_t
         end
 
         # Update and compute log-likelihood
-        update!(k, y[:, t], block_num; return_loglh = return_loglh)
+        update!(k, y[:, t], block_num, block_dims; return_loglh = return_loglh)
         if return_filt
             s_filt[:,    t] = k.s_t
             P_filt[:, :, t] = k.P_t
@@ -84,7 +84,7 @@ function block_kalman_filter(y::Matrix{S}, Ttild::Matrix{S}, Rtild::Matrix{S},
         end
 
         # Update s_0 and P_0 if Nt_0 > 0, presample periods
-        if t == Nt_0
+        if t == Nt0
             s_0 = k.s_t
             P_0 = k.P_t
         end
@@ -103,7 +103,7 @@ end
 
 # Computes the on-step-ahead states s_{t|t-1} and state covariances P_{t|t-1}
 # and assign to 'k'
-function forecast!(k::KalmanFilter{S}, block_num::Int64) where {S<:AbstractFloat}
+function forecast!(k::KalmanFilter{Float64}, block_num::Int64, block_dims::Vector{Int64})
     T, R, C, Q = k.T, k.R, k.C, k.Q
     s_filt, P_filt = k.s_t, k.P_t
 
@@ -117,16 +117,16 @@ function forecast!(k::KalmanFilter{S}, block_num::Int64) where {S<:AbstractFloat
         P12_filt = P_filt[1:dim1, dim1 + 1:end]
         P22_filt = P_filt[dim1 + 1:end, dim1 + 1:end]
         Ablock = T[1:dim1, 1:dim1]
-        Bblock = R[dim1 + 1:end, dim1 + 1:end]
+        Bblock = R[dim1 + 1:end, 1:dim1]
         Cblock = T[dim1 + 1:end, dim1 + 1:end]
         Q1 = Q[1:dim1, 1:dim1]
         Q2 = Q[dim1 + 1:end, dim1 + 1:end]
 
         # Compute P_t
-        L_t = (P12_filt * Cblock') .* diag(Ablock) * ones(1, dim2)
-        P11_t = P11_filt .* diag(Ablock) * diag(Ablock') + Q
+        L_t = (P12_filt * Cblock') .* (diag(Ablock) * ones(1, dim2))
+        P11_t = P11_filt .* (diag(Ablock) * diag(Ablock)') + Q1
         P12_t = P11_t * Bblock' + L_t
-        G = Bblock *(P12_t + L_t)
+        G = Bblock * (P12_t + L_t)
         P22_t = (G + G')/2 + Cblock * P22_filt * Cblock'
 
         # Compute s_t
@@ -141,14 +141,14 @@ function forecast!(k::KalmanFilter{S}, block_num::Int64) where {S<:AbstractFloat
     return nothing
 end
 
-function update!(k::KalmanFilter{S}, y_obs::Vector{S}, block_num::Int64;
-                 return_loglh::Bool = true) where {S<:AbstractFloat}
+function update!(k::KalmanFilter{Float64}, y_obs::Vector{Float64}, block_num::Int64, block_dims::Vector{Int64};
+                 return_loglh::Bool = true)
     # Keep rows of measurement equation corresponding to non-NaN observables
     nonnan = .!isnan.(y_obs)
     y_obs = y_obs[nonnan]
     Z = k.Z[nonnan, :]
     D = k.D[nonnan]
-    E = k.E[nonnan, nonnan]
+    H = k.E[nonnan, nonnan]
     Ny = length(y_obs)
 
     s_pred = k.s_t
@@ -163,7 +163,7 @@ function update!(k::KalmanFilter{S}, y_obs::Vector{S}, block_num::Int64;
         P11_pred = P_pred[1:dim1, 1:dim1]
         P12_pred = P_pred[1:dim1, dim1 + 1:end]
         P22_pred = P_pred[dim1 + 1:end, dim1 + 1:end]
-        Z2 = Z[dim1 + 1:end]
+        Z2 = Z[:, dim1 + 1:end]
 
         # Compute predicted y, measurement covariance matrix, error, and auxiliary matrices
         y_pred = Z2 * s2_pred + D
