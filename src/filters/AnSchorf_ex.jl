@@ -8,6 +8,7 @@ using QuantEcon: solve_discrete_lyapunov
 
 include("kalman_filter.jl")
 include("test.jl")
+include("large_scale_kalman.jl")
 
 m = AnSchorfheide()
 
@@ -47,7 +48,7 @@ M[5, 5] = 0; M[5, 2] = 1
 # M[5, 5] = 0; M[5, 1] = 1
 # M[2, 2] = 0; M[2, 6] = 1
 # M[6, 6] = 0; M[6, 2] = 1
-Mtild = eye(3) # We preserve orderings of shocks
+Mtild = eye(3) # We preserve orderings of state shocks
 @assert false
-output = block_kalman_filter(data, T, R, C, Q, Z, D, E, M, Mtild, s_0, P_0, [2; 0; 0; 6])
+output = block_kalman_filter(data, T, R, C, Q, Z, D, E, M, Mtild, [2; 0; 0; 6], s_0, P_0)
 println(sum(output[1]))
