@@ -49,6 +49,13 @@ M[5, 5] = 0; M[5, 2] = 1
 # M[2, 2] = 0; M[2, 6] = 1
 # M[6, 6] = 0; M[6, 2] = 1
 Mtild = eye(3) # We preserve orderings of state shocks
-@assert false
+
+# Zero out entries that should be zero
+T_ord = M' * T * M
+R_ord = M' * R * Mtild
+T_ord[1:2, 3:end] = 0; T_ord[1, 2] = 0; T_ord[2, 1] = 0
+R_ord[1, 2] = 0; R_ord[2, 1] = 0
+T = inv(M') * T_ord * inv(M)
+R = inv(M') * R_ord * inv(Mtild)
 output = block_kalman_filter(data, T, R, C, Q, Z, D, E, M, Mtild, [2; 0; 0; 6], s_0, P_0)
 println(sum(output[1]))

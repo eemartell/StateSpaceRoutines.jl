@@ -44,14 +44,15 @@ function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::
     s_0 = M * s_0tild
     P_0 = M' * P_0tild * M
 
-    # Grab true outputs, pre-reordering
-    ~, s_pred_true1, P_pred_true1, s_filt_true1, P_filt_true1, ~, ~, ~, ~ = kalman_filter(y, Ttild, Rtild, Ctild, Qtild, Ztild, Dtild, Htild, s_0tild, P_0tild)
+    # check for whether the matrices satisfy block-kalman filter set up
+    if block_num == 2 && Z[:, 1:block_dims[1]] != zeros(size(Z, 1), block_dims[1])
+        # In true_block case, Z1 = 0
+        true_block = false
+    elseif block_num == 2 && block_dims[1] != size(R, 2)
+        # In true 2-block case, number of exogenous shocks equals sum of first three block entries
+        true_block = false
+    end
 
-    # Grab true outputs, post-reordering
-    ~, s_pred_true2, P_pred_true2, s_filt_true2, P_filt_true2, ~, ~, ~, ~ = kalman_filter(y, T, R, C, Q, Z, D, H, s_0, P_0)
-
-    global s_pred_true1, s_pred_true2, P_pred_true1, P_pred_true2
-    global s_filt_true1, s_filt_true2, P_filt_true1, P_filt_true2
     # Determine outputs
     return_loglh = :loglh in outputs
     return_pred  = :pred in outputs
@@ -63,7 +64,7 @@ function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::
 
     # Initialize Inputs and outputs
     k = KalmanFilter(T, R, C, Q, Z, D, H, s_0, P_0)
-    global k
+
     mynan  = convert(Float64, NaN)
     loglh  = return_loglh ? fill(mynan, Nt)         : Vector{Float64}(0)
     s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{Float64}(0, 0)
@@ -83,10 +84,8 @@ function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::
             s_pred[:,    t] = k.s_t
             P_pred[:, :, t] = k.P_t
             try
-                @assert isapprox(k.s_t, M * s_pred_true1[:, t], atol = 1e-4)
-                #@assert isapprox(k.P_t, M' * P_pred_true1[:, :, t] * M)
-                @assert isapprox(k.s_t, s_pred_true2[:, t], atol = 1e-4)
-                #@assert isapprox(k.P_t, P_pred_true2[:, :, t])
+                @assert isapprox(k.s_t, s_pred_true[:, t])
+                @assert isapprox(k.P_t, P_pred_true[:, :, t])
             catch
                 println("Failed at forecast, time step $t")
                 @assert false
@@ -99,10 +98,8 @@ function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::
             s_filt[:,    t] = k.s_t
             P_filt[:, :, t] = k.P_t
             try
-                @assert isapprox(k.s_t, M * s_filt_true1[:, t], atol = 1e-4)
-                #@assert isapprox(k.P_t, M' * P_filt_true1[:, :, t] * M)
-                @assert isapprox(k.s_t, s_filt_true2[:, t], atol = 1e-4)
-                #@assert isapprox(k.P_t, P_filt_true2[:, :, t], atol = 1e-2)
+                @assert isapprox(k.s_t, s_filt_true[:, t])
+                @assert isapprox(k.P_t, P_filt_true[:, :, t])
             catch
                 println("Failed at update, time step $t")
                 @assert false
@@ -178,8 +175,7 @@ function forecast!(k::KalmanFilter{Float64}, block_num::Int64, block_dims::Vecto
 
             # Compute final matrices
             P22_t = (G + G')/2 + Rlo * Q2 * Rlo' + Cblock * P22_filt * Cblock'
-            global RupQ2, Rlo, P11_t, Bblock, L_t, P22_t
-            P12_t = (P11_t + RupQ2 * Rlo') * Bblock' + L_t
+            P12_t = P12_t + RupQ2 * Rlo'
             P11_t = P11_t + RupQ2 * Rup'
 
             s1_t = diag(Ablock) .* s1_filt
@@ -208,7 +204,7 @@ function update!(k::KalmanFilter{Float64}, y_obs::Vector{Float64}, block_num::In
     P_pred = k.P_t
 
     if block_num == 2
-        # Get block matrices that don't depend on true_block
+        # Get block matrices
         dim1 = block_dims[1] # dimension of exogenous AR(1) processes
         dim2 = block_dims[4] # dimension of endogenous states
         s1_pred  = s_pred[1:dim1]
@@ -219,22 +215,41 @@ function update!(k::KalmanFilter{Float64}, y_obs::Vector{Float64}, block_num::In
         Z2 = Z[:, dim1 + 1:end]
 
         # Compute predicted y, measurement covariance matrix, error, and auxiliary matrices
-        y_pred = Z2 * s2_pred + D
-        V_pred = Z2 * P22_pred * Z2' + H # Z = [0 Z2]
+        if true_block
+            y_pred = Z2 * s2_pred + D
+            V_pred = Z2 * P22_pred * Z2' + H
+        else
+            Z1 = Z[:, 1:dim1]
+            off_diag_mat = Z1 * P12_pred * Z2'
+            y_pred = Z * s_pred + D
+            V_pred = Z1 * P11_pred * Z1' + off_diag_mat + off_diag_mat' + Z2 * P22_pred * Z2' + H
+        end
         V_pred_inv = inv(V_pred)
         dy = y_obs - y_pred # prediction error
-        PZV_1 = P12_pred * Z2' * V_pred_inv
-        PZV_2 = P22_pred * Z2' * V_pred_inv
+
+        # Update state covariance matrix
+        if true_block
+            PZV_1 = P12_pred * Z2' * V_pred_inv
+            PZV_2 = P22_pred * Z2' * V_pred_inv
+
+            Z2_P22_pred = Z2 * P22_pred
+            P11_t = P11_pred - PZV_1 * Z2 * P12_pred'
+            P12_t = P12_pred - PZV_1 * Z2_P22_pred
+            P22_t = P22_pred - PZV_2 * Z2_P22_pred
+        else
+            kalman_gain_1 = P11_pred * Z1' + P12_pred * Z2'
+            kalman_gain_2 = P12_pred' * Z1' + P22_pred * Z2'
+            PZV_1 = kalman_gain_1 * V_pred_inv
+            PZV_2 = kalman_gain_2 * V_pred_inv
+
+            P11_t = P11_pred - PZV_1 * kalman_gain_1'
+            P12_t = P12_pred - PZV_1 * kalman_gain_2'
+            P22_t = P22_pred - PZV_2 * kalman_gain_2'
+        end
 
         # Update states
         s1_t = s1_pred + PZV_1 * dy
         s2_t = s2_pred + PZV_2 * dy
-
-        # Update state covariance matrix
-        Z2_P22_pred = Z2 * P22_pred
-        P11_t = P11_pred - PZV_1 * Z2 * P12_pred'
-        P12_t = P12_pred - PZV_1 * Z2_P22_pred
-        P22_t = P22_pred - PZV_2 * Z2_P22_pred
 
         # Save matrices
         k.s_t = vcat(s1_t, s2_t)
