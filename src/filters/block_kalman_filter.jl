@@ -22,15 +22,18 @@ mutable struct BlockKalmanFilter{S<:AbstractFloat}
     A1::Matrix{S}
     A2::Matrix{S}
     A3::Matrix{S}
-    A4::Matrix{S}
     B1::Matrix{S}
     B2::Matrix{S}
     B3::Matrix{S}
     Cblock::Matrix{S}
+    Rup::Matrix{S}
+    Rlo::Matrix{S}
     C::Vector{S}
     Q1::Matrix{S}
     Q2::Matrix{S}
     Q3::Matrix{S}
+    Z1::Matrix{S}
+    Z2::Matrix{S}
     Z3::Matrix{S}
     Z4::Matrix{S}
     D::Vector{S}
@@ -49,7 +52,11 @@ mutable struct BlockKalmanFilter{S<:AbstractFloat}
     P33_t::Matrix{S}
     P34_t::Matrix{S}
     P44_t::Matrix{S}
+    M::Matrix{S}
+    Mtild::Matrix{S}
     block_dims::Vector{Int64}
+    block_num::Int64
+    true_block::Bool
     loglh_t::S     # P(y_t | y_{1:t})
 end
 
@@ -60,14 +67,59 @@ KalmanFilter(T, R, C, Q, Z, D, E, [s_0, P_0])
 
 Outer constructor for the `KalmanFilter` type.
 """
-function KalmanFilter(A1::Matrix{S}, R::Matrix{S}, C::Vector{S}, Q::Matrix{S},
-                      Z::Matrix{S}, D::Vector{S}, E::Matrix{S},
-                      s_0::Vector{S} = Vector{S}(0), P_0::Matrix{S} = Matrix{S}(0, 0)) where {S<:AbstractFloat}
-    if isempty(s_0) || isempty(P_0)
-        s_0, P_0 = init_stationary_states(T, R, C, Q)
+function BlockKalmanFilter(Ttild::Matrix{S}, Rtild::Matrix{S}, Ctild::Vector{S}, Qtild::Matrix{S},
+                      Ztild::Matrix{S}, Dtild::Vector{S}, Etild::Matrix{S}, M::Matrix{S}, Mtild::Matrix{S},
+                           block_dims::Vector{Int64}, s_0tild::Vector{S} = Vector{S}(0),
+                           P_0tild::Matrix{S} = Matrix{S}(0, 0); block_num::Int64 = 2, true_block::Bool = false) where {S<:AbstractFloat}
+    if isempty(s_0tild) || isempty(P_0tild)
+        s_0tild, P_0tild = init_stationary_states(Ttild, Rtild, Ctild, Qtild)
     end
+    T = M' * Ttild * M
+    R = M' * Rtild * Mtild
+    C = M * Ctild
+    Q = Mtild' * Qtild * Mtild
+    Z = Ztild * M
+    # D and E are left as is
+    s_0 = M * s_0tild
+    P_0 = M' * P_0tild * M
+    if block_dims[2] == 0 & block_dims[3] == 0
+        # 2-block case
+        dim1 = block_dims[1]; dim2 = block_dims[4]
+        A1 = T[1:dim1, 1:dim1]
+        B1 = R[dim1 + 1:end, 1:dim1]
+        Cblock = T[dim1 + 1:end, dim1 + 1:end]
+        Q1 = Q[1:dim1, 1:dim1]
+        Q2 = Matrix{S}(0, 0)
+        Z1 = Matrix{S}(0, 0)
+        Z2 = Z[:, dim1 + 1:end]
+        Rup = Matrix{S}(0, 0)
+        Rlo = Matrix{S}(0, 0)
 
-    return KalmanFilter(T, R, C, Q, Z, D, E, s_0, P_0, NaN)
+        # Check if dim1 is equal to number of exogenous shocks; if not, need to track more matrices
+        if dim1 != size(R, 2)
+            true_block = false
+            Rup = R[1:dim1, dim1 + 1:end]
+            Rlo = R[dim1 + 1:end, dim1 + 1:end]
+            Q2 = [Q[dim1 + 1:end, dim1 + 1:end]] # coerce into array
+        end
+        # Check Z is in true block form; if not (e.g. unit root), need to track more matrices
+        if Z[:, 1:dim1] .!= 0
+            true_block = false
+            Z1 = Z[:, 1:dim1]
+        end
+        s1_0 = s_0[1:dim1]
+        s2_0 = s_0[dim1 + 1:end]
+        P11_0 = P_0[1:dim1, 1:dim1]
+        P12_0 = P_0[1:dim1, dim1 + 1:end]
+        P22_0 = P_0[dim1 + 1;end, dim1 + 1:end]
+
+        return BlockKalmanFilter(A1, Matrix{S}(0, 0), Matrix{S}(0, 0), B1, Matrix{S}(0, 0), Matrix{S}(0, 0),
+                          Cblock, Rup, Rlo, C, Q1, Q2, Matrix{S}(0, 0), Z1, Z2, Matrix{S}(0, 0),
+                          Matrix{S}(0, 0), D, E, s1_0, s2_0, Vector{S}(0), Vector{S}(0),
+                          P11_0, P12_0, Matrix{S}(0, 0), Matrix{S}(0, 0), P22_0,
+                          Matrix{S}(0, 0), Matrix{S}(0, 0), Matrix{S}(0, 0), Matrix{S}(0, 0),
+                          Matrix{S}(0, 0), M, Mtild, block_dims, block_num, true_block, NaN)
+    end
 end
 
 """
@@ -194,100 +246,36 @@ where:
 When `s_0` and `P_0` are omitted, they are computed using
 `init_stationary_states`.
 """
-function kalman_filter(regime_indices::Vector{Range{Int}}, y::Matrix{S},
-    Ts::Vector{Matrix{S}}, Rs::Vector{Matrix{S}}, Cs::Vector{Vector{S}},
-    Qs::Vector{Matrix{S}}, Zs::Vector{Matrix{S}}, Ds::Vector{Vector{S}}, Es::Vector{Matrix{S}},
-    s_0::Vector{S} = Vector{S}(0), P_0::Matrix{S} = Matrix{S}(0, 0);
-    outputs::Vector{Symbol} = [:loglh, :pred, :filt],
-    Nt0::Int = 0) where {S<:AbstractFloat}
+function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::Matrix{Float64},
+                             Ctild::Vector{Float64}, Qtild::Matrix{Float64}, Ztild::Matrix{Float64},
+                             Dtild::Vector{Float64}, Etild::Matrix{Float64},
+                             M::Matrix{Float64}, Mtild::Matrix{Float64}, block_dims::Vector{Int64},
+                             s_0tild::Vector{Float64} = Vector{Float64}(0),
+                             P_0tild::Matrix{Float64} = Matrix{Float64}(0,0);
+                             outputs::Vector{Symbol} = [:loglh, :pred, :filt],
+                             Nt0::Int = 0, block_num::Int64 = 2, true_block::Bool = false)
 
     # Determine outputs
     return_loglh = :loglh in outputs
-    return_pred  = :pred  in outputs
-    return_filt  = :filt  in outputs
+    return_pred  = :pred in outputs
+    return_filt  = :filt in outputs
 
     # Dimensions
-    Ns = size(Ts[1], 1) # number of states
-    Nt = size(y, 2)     # number of periods of data
+    Ns = size(T,1) # number of states
+    Nt = size(y,2) # number of periods of data
 
-    @assert first(regime_indices[1]) == 1
-    @assert last(regime_indices[end]) == Nt
+    # Initialize Inputs and outputs, populate initial states
+    s_0 = M * s_0tild
+    P_0 = M' * P_0tild * M
+    k = BlockKalmanFilter(Ttild, Rtild, Ctild, Qtild, Ztild, Dtild, Etild, M, Mtild,
+                          block_dims, s_0tild, P_0tild; block_num = block_num, true_block = true_block)
 
-    # Initialize inputs and outputs
-    k = KalmanFilter(Ts[1], Rs[1], Cs[1], Qs[1], Zs[1], Ds[1], Es[1], s_0, P_0)
-
-    mynan = convert(S, NaN)
-    s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
-    P_pred = return_pred  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
-    s_filt = return_filt  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
-    P_filt = return_filt  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
-    loglh  = return_loglh ? fill(mynan, Nt)         : Vector{S}(0)
-
-    # Populate s_0 and P_0
-    s_0 = k.s_t
-    P_0 = k.P_t
-
-    # Iterate through regimes
-    s_t = s_0
-    P_t = P_0
-
-    for i = 1:length(regime_indices)
-        ts = regime_indices[i]
-        loglh_i, s_pred_i, P_pred_i, s_filt_i, P_filt_i, s_0, P_0, s_t, P_t =
-            kalman_filter(y[:, ts], Ts[i], Rs[i], Cs[i], Qs[i], Zs[i], Ds[i], Es[i],
-                              s_t, P_t; outputs = outputs, Nt0 = 0)
-        if return_loglh
-            loglh[ts] = loglh_i
-        end
-        if return_pred
-            s_pred[:,    ts] = s_pred_i
-            P_pred[:, :, ts] = P_pred_i
-        end
-        if return_filt
-            s_filt[:,    ts] = s_filt_i
-            P_filt[:, :, ts] = P_filt_i
-        end
-    end
-
-    # Populate s_T and P_T
-    s_T, P_T = s_t, P_t
-
-    # Remove presample periods
-    loglh, s_pred, P_pred, s_filt, P_filt =
-        remove_presample!(Nt0, loglh, s_pred, P_pred, s_filt, P_filt; outputs = outputs)
-
-    return loglh, s_pred, P_pred, s_filt, P_filt, s_0, P_0, s_T, P_T
-end
-
-function kalman_filter(y::Matrix{S},
-    T::Matrix{S}, R::Matrix{S}, C::Vector{S},
-    Q::Matrix{S}, Z::Matrix{S}, D::Vector{S}, E::Matrix{S},
-    s_0::Vector{S} = Vector{S}(0), P_0::Matrix{S} = Matrix{S}(0, 0);
-    outputs::Vector{Symbol} = [:loglh, :pred, :filt],
-    Nt0::Int = 0) where {S<:AbstractFloat}
-
-    # Determine outputs
-    return_loglh = :loglh in outputs
-    return_pred  = :pred  in outputs
-    return_filt  = :filt  in outputs
-
-    # Dimensions
-    Ns = size(T, 1) # number of states
-    Nt = size(y, 2) # number of periods of data
-
-    # Initialize inputs and outputs
-    k = KalmanFilter(T, R, C, Q, Z, D, E, s_0, P_0)
-
-    mynan = convert(S, NaN)
-    loglh  = return_loglh ? fill(mynan, Nt)         : Vector{S}(0)
-    s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
-    P_pred = return_pred  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
-    s_filt = return_filt  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
-    P_filt = return_filt  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
-
-    # Populate initial states
-    s_0 = k.s_t
-    P_0 = k.P_t
+    mynan  = convert(Float64, NaN)
+    loglh  = return_loglh ? fill(mynan, Nt)         : Vector{Float64}(0)
+    s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{Float64}(0, 0)
+    P_pred = return_pred  ? fill(mynan, Ns, Ns, Nt) : Array{Float64, 3}(0, 0, 0)
+    s_filt = return_filt  ? fill(mynan, Ns, Nt)     : Matrix{Float64}(0, 0)
+    P_filt = return_filt  ? fill(mynan, Ns, Ns, Nt) : Array{Float64, 3}(0, 0, 0)
 
     # Loop through periods t
     for t = 1:Nt
@@ -299,7 +287,7 @@ function kalman_filter(y::Matrix{S},
         end
 
         # Update and compute log-likelihood
-        update!(k, y[:, t]; return_loglh = return_loglh)
+        update!(k, y[:, t], block_num, block_dims, true_block; return_loglh = return_loglh)
         if return_filt
             s_filt[:,    t] = k.s_t
             P_filt[:, :, t] = k.P_t
@@ -308,101 +296,168 @@ function kalman_filter(y::Matrix{S},
             loglh[t]        = k.loglh_t
         end
 
-        # Update s_0 and P_0 if Nt0 > 0
-        if t == Nt0
-            s_0 = k.s_t
-            P_0 = k.P_t
-        end
+        # # Update s_0 and P_0 if Nt_0 > 0, presample periods
+        # if t == Nt0
+        #     s_0 = k.s_t
+        #     P_0 = k.P_t
+        # end
     end
 
     # Populate final states
-    s_T = k.s_t
-    P_T = k.P_t
+    if k.block_num == 2
+        s_T = vcat(k.s1_t, k.s2_t)
+        P_T = [k.P11_t, k.P12_t; k.P12_t' k.P22_t]
+    end
 
-    # Remove presample periods
-    loglh, s_pred, P_pred, s_filt, P_filt =
-        remove_presample!(Nt0, loglh, s_pred, P_pred, s_filt, P_filt; outputs = outputs)
+    # # Remove presample periods
+    # loglh, s_pred, P_pred, s_filt, P_filt =
+    #     remove_presample!(Nt0, loglh, s_pred, P_pred, s_filt, P_filt; outputs = outputs)
 
     return loglh, s_pred, P_pred, s_filt, P_filt, s_0, P_0, s_T, P_T
 end
 
-"""
-```
-forecast!(k::KalmanFilter)
-```
+# Computes the one-step-ahead states s_{t|t-1} and state covariances P_{t|t-1}
+# and assign to 'k'
+function forecast!(k::KalmanFilter{Float64})
 
-Compute the one-step-ahead states s_{t|t-1} and state covariances P_{t|t-1} and
-assign to `k`.
-"""
-function forecast!(k::KalmanFilter{S}) where {S<:AbstractFloat}
-    T, R, C, Q = k.T, k.R, k.C, k.Q
-    s_filt, P_filt = k.s_t, k.P_t
+    if block_num == 2
+        # Get block matrices that don't depend on true_block
+        dim1 = k.block_dims[1] # dimension of exogenous AR(1) processes
+        dim2 = k.block_dims[4] # dimension of endogenous states
+        s1_filt = k.s1_t
+        s2_filt = k.s2_t
+        P11_filt = k.P11_t
+        P12_filt = k.P12_t
+        P22_filt = k.P22_t
+        Ablock = k.A1
+        Bblock = k.B1
+        Cblock = k.Cblock
 
-    k.s_t = T*s_filt + C         # s_{t|t-1} = T*s_{t-1|t-1} + C
-    k.P_t = T*P_filt*T' + R*Q*R' # P_{t|t-1} = Var s_{t|t-1} = T*P_{t-1|t-1}*T' + R*Q*R'
+        # Compute P_t, s_t
+        if k.true_block
+            L_t = (P12_filt * Cblock') .* (diag(Ablock) * ones(1, dim2))
+            P11_t = P11_filt .* (diag(Ablock) * diag(Ablock)') + k.Q1
+            P12_t = P11_t * Bblock' + L_t
+            G = Bblock * (P12_t + L_t)
+            P22_t = (G + G')/2 + Cblock * P22_filt * Cblock'
+
+            s1_t = diag(Ablock) .* s1_filt
+            s2_t = Bblock * k.s1_t + Cblock * s2_filt
+        else
+            # RQR' = |  Q1 + Rup * Q2 * Rup', Q1*Bblock' + Rup * Q2 * Rlo'        |
+            #        |     ---           , Bblock * Q1 * Bblock' + Rlo * Q2 * Rlo'|
+            L_t = (P12_filt * Cblock') .* (diag(Ablock) * ones(1, dim2))
+            RupQ2 = k.Rup * k.Q2
+
+            # Compute intermediate matrices to minimize additions
+            P11_t = P11_filt .* (diag(Ablock) * diag(Ablock)') + k.Q1
+            P12_t = P11_t * Bblock' + L_t
+            G = Bblock * (P12_t + L_t)
+
+            # Compute final matrices
+            P22_t = (G + G')/2 + k.Rlo * k.Q2 * k.Rlo' + Cblock * P22_filt * Cblock'
+            P12_t = P12_t + RupQ2 * k.Rlo'
+            P11_t = P11_t + RupQ2 * k.Rup'
+
+            s1_t = diag(Ablock) .* s1_filt
+            s2_t = Bblock * s1_t + Cblock * s2_filt
+        end
+
+        # Save values
+        k.s1_t = s1_t; k.s2_t = s2_t; k.P11_t = P11_t; k.P12_t = P12_t; k.P22_t = P22_t
+    end
     return nothing
 end
 
-"""
-```
-update!(k::KalmanFilter{S}, y_obs)
-```
-
-Compute the filtered states s_{t|t} and state covariances P_{t|t}, and the
-log-likelihood P(y_t | y_{1:t-1}) and assign to `k`.
-"""
-function update!(k::KalmanFilter{S}, y_obs::Vector{S};
-                 return_loglh::Bool = true) where {S<:AbstractFloat}
+function update!(k::KalmanFilter{Float64}, y_obs::Vector{Float64}; return_loglh::Bool = true)
     # Keep rows of measurement equation corresponding to non-NaN observables
     nonnan = .!isnan.(y_obs)
     y_obs = y_obs[nonnan]
-    Z = k.Z[nonnan, :]
     D = k.D[nonnan]
     E = k.E[nonnan, nonnan]
     Ny = length(y_obs)
 
-    s_pred = k.s_t
-    P_pred = k.P_t
+    if block_num == 2
+        # Get block matrices
+        dim1 = k.block_dims[1] # dimension of exogenous AR(1) processes
+        dim2 = k.block_dims[4] # dimension of endogenous states
+        s1_pred  = k.s1_t
+        s2_pred  = k.s2_t
+        P11_pred = k.P11_t
+        P12_pred = k.P12_t
+        P22_pred = k.P22_t
+        Z2 = k.Z2[nonnan, :]
 
-    y_pred = Z*s_pred + D         # y_{t|t-1} = Z*s_{t|t-1} + D
-    V_pred = Z*P_pred*Z' + E      # V_{t|t-1} = Var y_{t|t-1} = Z*P_{t|t-1}*Z' + E
-    V_pred = (V_pred + V_pred')/2
-    V_pred_inv = inv(V_pred)
-    dy = y_obs - y_pred           # dy = y_t - y_{t|t-1} = prediction error
-    PZV = P_pred'*Z'*V_pred_inv
+        # Compute predicted y, measurement covariance matrix, error, and auxiliary matrices
+        if k.true_block
+            y_pred = Z2 * s2_pred + D
+            V_pred = Z2 * P22_pred * Z2' + E
+        else
+            Z1 = k.Z1[nonnan, :]
+            off_diag_mat = Z1 * P12_pred * Z2'
+            y_pred = Z * s_pred + D
+            V_pred = Z1 * P11_pred * Z1' + off_diag_mat + off_diag_mat' + Z2 * P22_pred * Z2' + E
+        end
+        V_pred_inv = inv(V_pred)
+        dy = y_obs - y_pred # prediction error
 
-    k.s_t = s_pred + PZV*dy       # s_{t|t} = s_{t|t-1} + P_{t|t-1}'*Z'/V_{t|t-1}*dy
-    k.P_t = P_pred - PZV*Z*P_pred # P_{t|t} = P_{t|t-1} - P_{t|t-1}'*Z'/V_{t|t-1}*Z*P_{t|t-1}
+        # Update state covariance matrix
+        if k.true_block
+            PZV_1 = P12_pred * Z2' * V_pred_inv
+            PZV_2 = P22_pred * Z2' * V_pred_inv
 
-    if return_loglh
-        k.loglh_t = -(Ny*log(2π) + log(det(V_pred)) + dy'*V_pred_inv*dy)/2 # p(y_t | y_{1:t-1})
+            Z2_P22_pred = Z2 * P22_pred
+            P11_t = P11_pred - PZV_1 * Z2 * P12_pred'
+            P12_t = P12_pred - PZV_1 * Z2_P22_pred
+            P22_t = P22_pred - PZV_2 * Z2_P22_pred
+        else
+            kalman_gain_1 = P11_pred * Z1' + P12_pred * Z2'
+            kalman_gain_2 = P12_pred' * Z1' + P22_pred * Z2'
+            PZV_1 = kalman_gain_1 * V_pred_inv
+            PZV_2 = kalman_gain_2 * V_pred_inv
+
+            P11_t = P11_pred - PZV_1 * kalman_gain_1'
+            P12_t = P12_pred - PZV_1 * kalman_gain_2'
+            P22_t = P22_pred - PZV_2 * kalman_gain_2'
+        end
+
+        # Update states
+        s1_t = s1_pred + PZV_1 * dy
+        s2_t = s2_pred + PZV_2 * dy
+
+        # Save matrices
+        k.s1_t = s1_t; k.s2_t = s2_t
+        k.P11_t = P11_t; k.P12_t = P12_t; k.P22_t = P22_t
+
+        if return_loglh
+            k.loglh_t = -(Ny * log(2*π) + log(det(V_pred)) + dy'*V_pred_inv*dy)/2
+        end
     end
-    return nothing
 end
 
-"""
-```
-remove_presample!(Nt0, loglh, s_pred, P_pred, s_filt, P_filt)
-```
+# """
+# ```
+# remove_presample!(Nt0, loglh, s_pred, P_pred, s_filt, P_filt)
+# ```
 
-Remove the first `Nt0` periods from all other input arguments and return.
-"""
-function remove_presample!(Nt0::Int, loglh::Vector{S},
-                           s_pred::Matrix{S}, P_pred::Array{S, 3},
-                           s_filt::Matrix{S}, P_filt::Array{S, 3};
-                           outputs::Vector{Symbol} = [:loglh, :pred, :filt]) where {S<:AbstractFloat}
-    if Nt0 > 0
-        if :loglh in outputs
-            loglh  = loglh[(Nt0+1):end]
-        end
-        if :pred in outputs
-            s_pred = s_pred[:,    (Nt0+1):end]
-            P_pred = P_pred[:, :, (Nt0+1):end]
-        end
-        if :filt in outputs
-            s_filt = s_filt[:,    (Nt0+1):end]
-            P_filt = P_filt[:, :, (Nt0+1):end]
-        end
-    end
-    return loglh, s_pred, P_pred, s_filt, P_filt
-end
+# Remove the first `Nt0` periods from all other input arguments and return.
+# """
+# function remove_presample!(Nt0::Int, loglh::Vector{S},
+#                            s_pred::Matrix{S}, P_pred::Array{S, 3},
+#                            s_filt::Matrix{S}, P_filt::Array{S, 3};
+#                            outputs::Vector{Symbol} = [:loglh, :pred, :filt]) where {S<:AbstractFloat}
+#     if Nt0 > 0
+#         if :loglh in outputs
+#             loglh  = loglh[(Nt0+1):end]
+#         end
+#         if :pred in outputs
+#             s_pred = s_pred[:,    (Nt0+1):end]
+#             P_pred = P_pred[:, :, (Nt0+1):end]
+#         end
+#         if :filt in outputs
+#             s_filt = s_filt[:,    (Nt0+1):end]
+#             P_filt = P_filt[:, :, (Nt0+1):end]
+#         end
+#     end
+#     return loglh, s_pred, P_pred, s_filt, P_filt
+# end
