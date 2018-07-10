@@ -1,18 +1,55 @@
 #=
-This code is loosely based on a routine originally copyright Federal Reserve Bank of Atlanta
-and written by Iskander Karibzhanov.
+This code is loosely based on
+Strid and Walentin (2008) "Block Kalman filtering for large-scale DSGE models"
+
+T = |A1  0  0  0 |
+    | 0  A2 0  0 |
+    | 0  0  A3 0 |
+    | B1*A1 B2*A2 B3*A3 Cblock |
+
+R = |Im1   0   0  |
+    | 0   Im2  0  |
+    | 0    0  Im3 |
+    | B1  B2  B3  |
+
+Q = |Q1  0  0 |
+    | 0  Q2 0 |
+    | 0  0  Q3|
+Z = [ 0  0  Z3  Z4]
 =#
 
-mutable struct KalmanFilter{S<:AbstractFloat}
-    T::Matrix{S}
-    R::Matrix{S}
+mutable struct BlockKalmanFilter{S<:AbstractFloat}
+    A1::Matrix{S}
+    A2::Matrix{S}
+    A3::Matrix{S}
+    A4::Matrix{S}
+    B1::Matrix{S}
+    B2::Matrix{S}
+    B3::Matrix{S}
+    Cblock::Matrix{S}
     C::Vector{S}
-    Q::Matrix{S}
-    Z::Matrix{S}
+    Q1::Matrix{S}
+    Q2::Matrix{S}
+    Q3::Matrix{S}
+    Z3::Matrix{S}
+    Z4::Matrix{S}
     D::Vector{S}
     E::Matrix{S}
-    s_t::Vector{S} # s_{t|t-1} or s_{t|t}
-    P_t::Matrix{S} # P_{t|t-1} or P_{t|t}
+    s1_t::Vector{S} # s1_{t|t-1} or s1_{t|t}, and so on
+    s2_t::Vector{S}
+    s3_t::Vector{S}
+    s4_t::Vector{S}
+    P11_t::Matrix{S} # P11_{t|t-1} or P11_{t|t}
+    P12_t::Matrix{S}
+    P13_t::Matrix{S}
+    P14_t::Matrix{S}
+    P22_t::Matrix{S}
+    P23_t::Matrix{S}
+    P24_t::Matrix{S}
+    P33_t::Matrix{S}
+    P34_t::Matrix{S}
+    P44_t::Matrix{S}
+    block_dims::Vector{Int64}
     loglh_t::S     # P(y_t | y_{1:t})
 end
 
@@ -23,7 +60,7 @@ KalmanFilter(T, R, C, Q, Z, D, E, [s_0, P_0])
 
 Outer constructor for the `KalmanFilter` type.
 """
-function KalmanFilter(T::Matrix{S}, R::Matrix{S}, C::Vector{S}, Q::Matrix{S},
+function KalmanFilter(A1::Matrix{S}, R::Matrix{S}, C::Vector{S}, Q::Matrix{S},
                       Z::Matrix{S}, D::Vector{S}, E::Matrix{S},
                       s_0::Vector{S} = Vector{S}(0), P_0::Matrix{S} = Matrix{S}(0, 0)) where {S<:AbstractFloat}
     if isempty(s_0) || isempty(P_0)
@@ -179,9 +216,7 @@ function kalman_filter(regime_indices::Vector{Range{Int}}, y::Matrix{S},
     # Initialize inputs and outputs
     k = KalmanFilter(Ts[1], Rs[1], Cs[1], Qs[1], Zs[1], Ds[1], Es[1], s_0, P_0)
 
-#    mynan = Float64
     mynan = convert(S, NaN)
-
     s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
     P_pred = return_pred  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
     s_filt = return_filt  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
@@ -243,8 +278,7 @@ function kalman_filter(y::Matrix{S},
     # Initialize inputs and outputs
     k = KalmanFilter(T, R, C, Q, Z, D, E, s_0, P_0)
 
-#    mynan = convert(S, NaN)
-    mynan = Float64
+    mynan = convert(S, NaN)
     loglh  = return_loglh ? fill(mynan, Nt)         : Vector{S}(0)
     s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
     P_pred = return_pred  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
@@ -303,6 +337,7 @@ assign to `k`.
 function forecast!(k::KalmanFilter{S}) where {S<:AbstractFloat}
     T, R, C, Q = k.T, k.R, k.C, k.Q
     s_filt, P_filt = k.s_t, k.P_t
+
     k.s_t = T*s_filt + C         # s_{t|t-1} = T*s_{t-1|t-1} + C
     k.P_t = T*P_filt*T' + R*Q*R' # P_{t|t-1} = Var s_{t|t-1} = T*P_{t-1|t-1}*T' + R*Q*R'
     return nothing
