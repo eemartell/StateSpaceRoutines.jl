@@ -179,7 +179,9 @@ function kalman_filter(regime_indices::Vector{Range{Int}}, y::Matrix{S},
     # Initialize inputs and outputs
     k = KalmanFilter(Ts[1], Rs[1], Cs[1], Qs[1], Zs[1], Ds[1], Es[1], s_0, P_0)
 
+#    mynan = Float64
     mynan = convert(S, NaN)
+
     s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
     P_pred = return_pred  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
     s_filt = return_filt  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
@@ -241,7 +243,8 @@ function kalman_filter(y::Matrix{S},
     # Initialize inputs and outputs
     k = KalmanFilter(T, R, C, Q, Z, D, E, s_0, P_0)
 
-    mynan = convert(S, NaN)
+#    mynan = convert(S, NaN)
+    mynan = Float64
     loglh  = return_loglh ? fill(mynan, Nt)         : Vector{S}(0)
     s_pred = return_pred  ? fill(mynan, Ns, Nt)     : Matrix{S}(0, 0)
     P_pred = return_pred  ? fill(mynan, Ns, Ns, Nt) : Array{S, 3}(0, 0, 0)
@@ -300,7 +303,6 @@ assign to `k`.
 function forecast!(k::KalmanFilter{S}) where {S<:AbstractFloat}
     T, R, C, Q = k.T, k.R, k.C, k.Q
     s_filt, P_filt = k.s_t, k.P_t
-
     k.s_t = T*s_filt + C         # s_{t|t-1} = T*s_{t-1|t-1} + C
     k.P_t = T*P_filt*T' + R*Q*R' # P_{t|t-1} = Var s_{t|t-1} = T*P_{t-1|t-1}*T' + R*Q*R'
     return nothing
