@@ -83,13 +83,6 @@ function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::
         if return_pred
             s_pred[:,    t] = k.s_t
             P_pred[:, :, t] = k.P_t
-            try
-                @assert isapprox(k.s_t, s_pred_true[:, t])
-                @assert isapprox(k.P_t, P_pred_true[:, :, t])
-            catch
-                println("Failed at forecast, time step $t")
-                @assert false
-            end
         end
 
         # Update and compute log-likelihood
@@ -97,13 +90,6 @@ function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::
         if return_filt
             s_filt[:,    t] = k.s_t
             P_filt[:, :, t] = k.P_t
-            try
-                @assert isapprox(k.s_t, s_filt_true[:, t])
-                @assert isapprox(k.P_t, P_filt_true[:, :, t])
-            catch
-                println("Failed at update, time step $t")
-                @assert false
-            end
         end
         if return_loglh
             loglh[t]        = k.loglh_t

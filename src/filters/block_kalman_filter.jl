@@ -1,21 +1,6 @@
 #=
 This code is loosely based on
 Strid and Walentin (2008) "Block Kalman filtering for large-scale DSGE models"
-
-T = |A1  0  0  0 |
-    | 0  A2 0  0 |
-    | 0  0  A3 0 |
-    | B1*A1 B2*A2 B3*A3 Cblock |
-
-R = |Im1   0   0  |
-    | 0   Im2  0  |
-    | 0    0  Im3 |
-    | B1  B2  B3  |
-
-Q = |Q1  0  0 |
-    | 0  Q2 0 |
-    | 0  0  Q3|
-Z = [ 0  0  Z3  Z4]
 =#
 
 mutable struct BlockKalmanFilter{S<:AbstractFloat}
@@ -29,9 +14,7 @@ mutable struct BlockKalmanFilter{S<:AbstractFloat}
     Rup::Matrix{S}
     Rlo::Matrix{S}
     C::Vector{S}
-    Q1::Matrix{S}
-    Q2::Matrix{S}
-    Q3::Matrix{S}
+    Q::Matrix{S}
     Z1::Matrix{S}
     Z2::Matrix{S}
     Z3::Matrix{S}
@@ -88,8 +71,6 @@ function BlockKalmanFilter(Ttild::Matrix{S}, Rtild::Matrix{S}, Ctild::Vector{S},
         A1 = T[1:dim1, 1:dim1]
         B1 = R[dim1 + 1:end, 1:dim1]
         Cblock = T[dim1 + 1:end, dim1 + 1:end]
-        Q1 = Q[1:dim1, 1:dim1]
-        Q2 = Matrix{S}(0, 0)
         Z1 = Matrix{S}(0, 0)
         Z2 = Z[:, dim1 + 1:end]
         Rup = Matrix{S}(0, 0)
@@ -100,10 +81,9 @@ function BlockKalmanFilter(Ttild::Matrix{S}, Rtild::Matrix{S}, Ctild::Vector{S},
             true_block = false
             Rup = R[1:dim1, dim1 + 1:end]
             Rlo = R[dim1 + 1:end, dim1 + 1:end]
-            Q2 = [Q[dim1 + 1:end, dim1 + 1:end]] # coerce into array
         end
         # Check Z is in true block form; if not (e.g. unit root), need to track more matrices
-        if Z[:, 1:dim1] .!= 0
+        if Z[:, 1:dim1] != zeros(Z[:, 1:dim1])
             true_block = false
             Z1 = Z[:, 1:dim1]
         end
@@ -111,10 +91,10 @@ function BlockKalmanFilter(Ttild::Matrix{S}, Rtild::Matrix{S}, Ctild::Vector{S},
         s2_0 = s_0[dim1 + 1:end]
         P11_0 = P_0[1:dim1, 1:dim1]
         P12_0 = P_0[1:dim1, dim1 + 1:end]
-        P22_0 = P_0[dim1 + 1;end, dim1 + 1:end]
+        P22_0 = P_0[dim1 + 1:end, dim1 + 1:end]
 
         return BlockKalmanFilter(A1, Matrix{S}(0, 0), Matrix{S}(0, 0), B1, Matrix{S}(0, 0), Matrix{S}(0, 0),
-                          Cblock, Rup, Rlo, C, Q1, Q2, Matrix{S}(0, 0), Z1, Z2, Matrix{S}(0, 0),
+                          Cblock, Rup, Rlo, C, Q, Z1, Z2, Matrix{S}(0, 0),
                           Matrix{S}(0, 0), D, E, s1_0, s2_0, Vector{S}(0), Vector{S}(0),
                           P11_0, P12_0, Matrix{S}(0, 0), Matrix{S}(0, 0), P22_0,
                           Matrix{S}(0, 0), Matrix{S}(0, 0), Matrix{S}(0, 0), Matrix{S}(0, 0),
@@ -282,15 +262,19 @@ function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::
         # Forecast
         forecast!(k)
         if return_pred
-            s_pred[:,    t] = k.s_t
-            P_pred[:, :, t] = k.P_t
+            if k.block_num == 2
+                s_pred[:,    t] = vcat(k.s1_t, k.s2_t)
+                P_pred[:, :, t] = [k.P11_t k.P12_t; k.P12_t' k.P22_t]
+            end
         end
 
         # Update and compute log-likelihood
-        update!(k, y[:, t], block_num, block_dims, true_block; return_loglh = return_loglh)
+        update!(k, y[:, t]; return_loglh = return_loglh)
         if return_filt
-            s_filt[:,    t] = k.s_t
-            P_filt[:, :, t] = k.P_t
+            if k.block_num == 2
+                s_filt[:,    t] = vcat(k.s1_t, k.s2_t)
+                P_filt[:, :, t] = [k.P11_t k.P12_t; k.P12_t' k.P22_t]
+            end
         end
         if return_loglh
             loglh[t]        = k.loglh_t
@@ -306,7 +290,7 @@ function block_kalman_filter(y::Matrix{Float64}, Ttild::Matrix{Float64}, Rtild::
     # Populate final states
     if k.block_num == 2
         s_T = vcat(k.s1_t, k.s2_t)
-        P_T = [k.P11_t, k.P12_t; k.P12_t' k.P22_t]
+        P_T = [k.P11_t k.P12_t; k.P12_t' k.P22_t]
     end
 
     # # Remove presample periods
@@ -318,9 +302,9 @@ end
 
 # Computes the one-step-ahead states s_{t|t-1} and state covariances P_{t|t-1}
 # and assign to 'k'
-function forecast!(k::KalmanFilter{Float64})
+function forecast!(k::BlockKalmanFilter{Float64})
 
-    if block_num == 2
+    if k.block_num == 2
         # Get block matrices that don't depend on true_block
         dim1 = k.block_dims[1] # dimension of exogenous AR(1) processes
         dim2 = k.block_dims[4] # dimension of endogenous states
@@ -332,11 +316,13 @@ function forecast!(k::KalmanFilter{Float64})
         Ablock = k.A1
         Bblock = k.B1
         Cblock = k.Cblock
+        Q1 = k.Q[1:dim1, 1:dim1]
+        Q2 = k.Q[dim1 + 1:end, dim1 + 1:end]
 
         # Compute P_t, s_t
         if k.true_block
             L_t = (P12_filt * Cblock') .* (diag(Ablock) * ones(1, dim2))
-            P11_t = P11_filt .* (diag(Ablock) * diag(Ablock)') + k.Q1
+            P11_t = P11_filt .* (diag(Ablock) * diag(Ablock)') + Q1
             P12_t = P11_t * Bblock' + L_t
             G = Bblock * (P12_t + L_t)
             P22_t = (G + G')/2 + Cblock * P22_filt * Cblock'
@@ -347,15 +333,15 @@ function forecast!(k::KalmanFilter{Float64})
             # RQR' = |  Q1 + Rup * Q2 * Rup', Q1*Bblock' + Rup * Q2 * Rlo'        |
             #        |     ---           , Bblock * Q1 * Bblock' + Rlo * Q2 * Rlo'|
             L_t = (P12_filt * Cblock') .* (diag(Ablock) * ones(1, dim2))
-            RupQ2 = k.Rup * k.Q2
+            RupQ2 = k.Rup * Q2
 
             # Compute intermediate matrices to minimize additions
-            P11_t = P11_filt .* (diag(Ablock) * diag(Ablock)') + k.Q1
+            P11_t = P11_filt .* (diag(Ablock) * diag(Ablock)') + Q1
             P12_t = P11_t * Bblock' + L_t
             G = Bblock * (P12_t + L_t)
 
             # Compute final matrices
-            P22_t = (G + G')/2 + k.Rlo * k.Q2 * k.Rlo' + Cblock * P22_filt * Cblock'
+            P22_t = (G + G')/2 + k.Rlo * Q2 * k.Rlo' + Cblock * P22_filt * Cblock'
             P12_t = P12_t + RupQ2 * k.Rlo'
             P11_t = P11_t + RupQ2 * k.Rup'
 
@@ -369,7 +355,7 @@ function forecast!(k::KalmanFilter{Float64})
     return nothing
 end
 
-function update!(k::KalmanFilter{Float64}, y_obs::Vector{Float64}; return_loglh::Bool = true)
+function update!(k::BlockKalmanFilter{Float64}, y_obs::Vector{Float64}; return_loglh::Bool = true)
     # Keep rows of measurement equation corresponding to non-NaN observables
     nonnan = .!isnan.(y_obs)
     y_obs = y_obs[nonnan]
@@ -377,7 +363,7 @@ function update!(k::KalmanFilter{Float64}, y_obs::Vector{Float64}; return_loglh:
     E = k.E[nonnan, nonnan]
     Ny = length(y_obs)
 
-    if block_num == 2
+    if k.block_num == 2
         # Get block matrices
         dim1 = k.block_dims[1] # dimension of exogenous AR(1) processes
         dim2 = k.block_dims[4] # dimension of endogenous states
@@ -395,7 +381,7 @@ function update!(k::KalmanFilter{Float64}, y_obs::Vector{Float64}; return_loglh:
         else
             Z1 = k.Z1[nonnan, :]
             off_diag_mat = Z1 * P12_pred * Z2'
-            y_pred = Z * s_pred + D
+            y_pred = Z1 * s1_pred + Z2 * s2_pred + D
             V_pred = Z1 * P11_pred * Z1' + off_diag_mat + off_diag_mat' + Z2 * P22_pred * Z2' + E
         end
         V_pred_inv = inv(V_pred)
